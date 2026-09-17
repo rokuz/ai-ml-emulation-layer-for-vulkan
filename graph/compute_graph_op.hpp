@@ -441,7 +441,7 @@ class Conv2D : public ComputePipeline {
     static bool getTileWords(const std::shared_ptr<TensorDescriptor> &input,
                              const std::shared_ptr<TensorDescriptor> &weights, const std::vector<int32_t> &stride,
                              const std::vector<int32_t> &dilation, uint32_t groups, uint32_t sharedMemoryBytes,
-                             uint32_t &inputWords,
+                             uint32_t valuesPerWord, uint32_t &inputWords,
                              uint32_t &weightWords);
 
     static void getTileGroupCounts(const std::shared_ptr<TensorDescriptor> &output, uint32_t &groupCountX,
@@ -484,6 +484,7 @@ class Conv2D : public ComputePipeline {
     static constexpr std::string_view tileShaderName = "conv2d_tile";
     static constexpr std::string_view tailTileShaderName = "conv2d_rescale_tile";
     static constexpr std::string_view tileDotShaderName = "conv2d_tile_dot";
+    static constexpr std::string_view tileFloatShaderName = "conv2d_tile_float";
     static constexpr std::string_view tailTileDotShaderName = "conv2d_rescale_tile_dot";
 
     static const uint32_t warpX = 8;
