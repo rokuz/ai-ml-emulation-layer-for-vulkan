@@ -344,35 +344,41 @@ mlel_generate_glsl(
     REPLACE "acc_t=float")
 list(APPEND SPV_FILES ${OUTPUT})
 
-# The tiled CONV2D kernels convolving with the integer dot product
-set(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_tile_dot_int8_t_int8_t_int_int.spv")
-mlel_generate_glsl(
-    INPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_tile_dot.comp"
-    OUTPUT ${OUTPUT}
-    REPLACE "warpX=${WARPX}"
-    REPLACE "warpY=${WARPY}"
-    REPLACE "warpZ=${WARPZ}"
-    REPLACE "in_t=int8_t"
-    REPLACE "weight_t=int8_t"
-    REPLACE "out_t=int"
-    REPLACE "acc_t=int")
-list(APPEND SPV_FILES ${OUTPUT})
-foreach(TAIL_OUT_T int8_t int16_t int)
-    foreach(TAIL_MUL_T int16_t int)
-        set(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_rescale_tile_dot_int8_t_int8_t_int_int_${TAIL_OUT_T}_${TAIL_MUL_T}.spv")
-        mlel_generate_glsl(
-            INPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_rescale_tile_dot.comp"
-            OUTPUT ${OUTPUT}
-            REPLACE "warpX=${WARPX}"
-            REPLACE "warpY=${WARPY}"
-            REPLACE "warpZ=${WARPZ}"
-            REPLACE "in_t=int8_t"
-            REPLACE "weight_t=int8_t"
-            REPLACE "out_t=int"
-            REPLACE "acc_t=int"
-            REPLACE "tail_out_t=${TAIL_OUT_T}"
-            REPLACE "tail_mul_t=${TAIL_MUL_T}")
-        list(APPEND SPV_FILES ${OUTPUT})
+# The tiled CONV2D kernels convolving with the integer dot product, one module per count of output pixels an invocation
+# computes. The count is substituted here, so that the accumulators stay in registers and the loop over them unrolls,
+# and it is the last part of the name, because the layer passes it as the last cache key.
+foreach(TILE_PX 1 2)
+    set(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_tile_dot_int8_t_int8_t_int_int_px${TILE_PX}.spv")
+    mlel_generate_glsl(
+        INPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_tile_dot.comp"
+        OUTPUT ${OUTPUT}
+        REPLACE "warpX=${WARPX}"
+        REPLACE "warpY=${WARPY}"
+        REPLACE "warpZ=${WARPZ}"
+        REPLACE "tile_pixels=${TILE_PX}"
+        REPLACE "in_t=int8_t"
+        REPLACE "weight_t=int8_t"
+        REPLACE "out_t=int"
+        REPLACE "acc_t=int")
+    list(APPEND SPV_FILES ${OUTPUT})
+    foreach(TAIL_OUT_T int8_t int16_t int)
+        foreach(TAIL_MUL_T int16_t int)
+            set(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_rescale_tile_dot_int8_t_int8_t_int_int_${TAIL_OUT_T}_${TAIL_MUL_T}_px${TILE_PX}.spv")
+            mlel_generate_glsl(
+                INPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_rescale_tile_dot.comp"
+                OUTPUT ${OUTPUT}
+                REPLACE "warpX=${WARPX}"
+                REPLACE "warpY=${WARPY}"
+                REPLACE "warpZ=${WARPZ}"
+                REPLACE "tile_pixels=${TILE_PX}"
+                REPLACE "in_t=int8_t"
+                REPLACE "weight_t=int8_t"
+                REPLACE "out_t=int"
+                REPLACE "acc_t=int"
+                REPLACE "tail_out_t=${TAIL_OUT_T}"
+                REPLACE "tail_mul_t=${TAIL_MUL_T}")
+            list(APPEND SPV_FILES ${OUTPUT})
+        endforeach()
     endforeach()
 endforeach()
 

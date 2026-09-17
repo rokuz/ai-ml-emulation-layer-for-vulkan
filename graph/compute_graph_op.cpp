@@ -1020,13 +1020,15 @@ Conv2D::Conv2D(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoade
                const std::vector<int32_t> &_stride, const std::vector<int32_t> &_dilation, const int8_t _inputZeroPoint,
                const int8_t _weightZeroPoint, const uint32_t _accType, const std::string &debugName, const RescaleTail *_tail,
                const uint32_t _tileInputWords, const uint32_t _tileWeightWords, const uint32_t _tileGroups,
-               const bool _tileDot)
+               const uint32_t _tilePixels, const bool _tileDot)
     : ComputePipeline(_loader, _device, createDescriptorMap(_input, _output, _weights, _biases, _tail),
                       {&pushConstant, sizeof(pushConstant)}, _pipelineCache,
-                      createSpirv(_pipelineCache, _input, _output, _weights, _accType, _tail, _tileInputWords != 0, _tileDot), debugName,
+                      createSpirv(_pipelineCache, _input, _output, _weights, _accType, _tail, _tileInputWords != 0,
+                                  _tileDot, _tilePixels),
+                      debugName,
                       tileConstants(_tail, _tileInputWords, _tileWeightWords, _tileGroups)),
       pushConstant{createPushConstant(_pad, _stride, _dilation, _inputZeroPoint, _weightZeroPoint)},
-      tiled{_tileInputWords != 0}, tileGroups{_tileGroups} {}
+      tiled{_tileInputWords != 0}, tileGroups{_tileGroups}, tilePixels{_tilePixels} {}
 
 Conv2D::PushConstant Conv2D::createPushConstant(const std::vector<int32_t> &pad, const std::vector<int32_t> &stride,
                                                 const std::vector<int32_t> &dilation, const int8_t inputZeroPoint,
@@ -1074,17 +1076,50 @@ SpirvBinary Conv2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
                                 const std::shared_ptr<TensorDescriptor> &input,
                                 const std::shared_ptr<TensorDescriptor> &output,
                                 const std::shared_ptr<TensorDescriptor> &weights, const uint32_t accType, const RescaleTail *tail,
-                                const bool tiled, const bool tileDot) const {
+                                const bool tiled, const bool tileDot, const uint32_t tilePixels) const {
     const auto *inType = getFormatInfo(input->getFormat());
     const auto *outType = getFormatInfo(tail != nullptr ? tail->inputFormat : output->getFormat());
     const auto *weightType = getFormatInfo(weights->getFormat());
     const auto *accTypeType = getFormatInfo(accTypeVkFormat(accType));
 
+    const std::string pixelsValue = std::to_string(tilePixels);
+    const std::string pixelsKey = "px" + pixelsValue;
+
     if (tail != nullptr) {
         const auto *tailOutType = getFormatInfo(output->getFormat());
         const auto *tailMulType = getFormatInfo(tail->multiplier->getFormat());
 
-        return _pipelineCache->lookup(tiled ? (tileDot ? tailTileDotShaderName : tailTileShaderName) : tailShaderName,
+        if (tiled && tileDot) {
+            return _pipelineCache->lookup(tailTileDotShaderName,
+                                          {
+                                              inType->glslType,
+                                              weightType->glslType,
+                                              outType->glslType,
+                                              accTypeType->glslType,
+                                              tailOutType->glslType,
+                                              tailMulType->glslType,
+                                              pixelsKey,
+                                          },
+                                          {
+                                              {"%warpX%", std::to_string(warpX)},
+                                              {"%warpY%", std::to_string(warpY)},
+                                              {"%warpZ%", std::to_string(warpZ)},
+                                              {"%tile_pixels%", pixelsValue},
+                                              {"%in_t%", inType->glslType},
+                                              {"%in_t_type%", inType->typeId},
+                                              {"%out_t%", outType->glslType},
+                                              {"%out_t_type%", outType->typeId},
+                                              {"%weight_t%", weightType->glslType},
+                                              {"%acc_t_type%", accTypeType->typeId},
+                                              {"%acc_t%", accTypeType->glslType},
+                                              {"%tail_out_t%", tailOutType->glslType},
+                                              {"%tail_out_t_lowest%", tailOutType->lowest},
+                                              {"%tail_out_t_max%", tailOutType->max},
+                                              {"%tail_mul_t%", tailMulType->glslType},
+                                          });
+        }
+
+        return _pipelineCache->lookup(tiled ? tailTileShaderName : tailShaderName,
                                       {
                                           inType->glslType,
                                           weightType->glslType,
@@ -1111,8 +1146,31 @@ SpirvBinary Conv2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
                                       });
     }
 
-    const std::string_view tiledName =
-        inType->isInteger ? (tileDot ? tileDotShaderName : tileShaderName) : tileFloatShaderName;
+    if (tiled && tileDot) {
+        return _pipelineCache->lookup(tileDotShaderName,
+                                      {
+                                          inType->glslType,
+                                          weightType->glslType,
+                                          outType->glslType,
+                                          accTypeType->glslType,
+                                          pixelsKey,
+                                      },
+                                      {
+                                          {"%warpX%", std::to_string(warpX)},
+                                          {"%warpY%", std::to_string(warpY)},
+                                          {"%warpZ%", std::to_string(warpZ)},
+                                          {"%tile_pixels%", pixelsValue},
+                                          {"%in_t%", inType->glslType},
+                                          {"%in_t_type%", inType->typeId},
+                                          {"%out_t%", outType->glslType},
+                                          {"%out_t_type%", outType->typeId},
+                                          {"%weight_t%", weightType->glslType},
+                                          {"%acc_t_type%", accTypeType->typeId},
+                                          {"%acc_t%", accTypeType->glslType},
+                                      });
+    }
+
+    const std::string_view tiledName = inType->isInteger ? tileShaderName : tileFloatShaderName;
     return _pipelineCache->lookup(tiled ? tiledName : shaderName,
                                   {
                                       inType->glslType,
@@ -1137,9 +1195,9 @@ SpirvBinary Conv2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
 bool Conv2D::getTileWords(const std::shared_ptr<TensorDescriptor> &input, const std::shared_ptr<TensorDescriptor> &weights,
                           const std::vector<int32_t> &stride, const std::vector<int32_t> &dilation,
                           const uint32_t groups, const uint32_t sharedMemoryBytes, const uint32_t valuesPerWord,
-                          uint32_t &inputWords, uint32_t &weightWords) {
+                          const uint32_t pixels, uint32_t &inputWords, uint32_t &weightWords) {
     if (input->getRank() != 4 || weights->getRank() != 4 || stride.size() != 2 || dilation.size() != 2 || stride[0] < 1 ||
-        stride[1] < 1 || dilation[0] < 1 || dilation[1] < 1) {
+        stride[1] < 1 || dilation[0] < 1 || dilation[1] < 1 || (valuesPerWord != 1 && valuesPerWord != 4)) {
         return false;
     }
 
@@ -1149,7 +1207,7 @@ bool Conv2D::getTileWords(const std::shared_ptr<TensorDescriptor> &input, const 
         (static_cast<uint64_t>(input->getDimensions()[3]) + 3) / 4 * (4 / static_cast<uint64_t>(valuesPerWord));
     const uint64_t tileHeight = (warpY - 1) * static_cast<uint64_t>(stride[0]) +
                                 (static_cast<uint64_t>(weightDimensions[1]) - 1) * static_cast<uint64_t>(dilation[0]) + 1;
-    const uint64_t tileWidth = (warpX - 1) * static_cast<uint64_t>(stride[1]) +
+    const uint64_t tileWidth = (warpX * static_cast<uint64_t>(pixels) - 1) * static_cast<uint64_t>(stride[1]) +
                                (static_cast<uint64_t>(weightDimensions[2]) - 1) * static_cast<uint64_t>(dilation[1]) + 1;
     const uint64_t tileInputWords = tileHeight * tileWidth * words;
     const uint64_t tileWeightWords =
@@ -1169,7 +1227,7 @@ void Conv2D::cmdDispatch(VkCommandBuffer commandBuffer) {
     const auto &tensor = pipelineLayout->getTensorForSet(0);
     const auto &dimensions = tensor->getDimensions();
     if (tiled) {
-        loader->vkCmdDispatch(commandBuffer, divideRoundUp(static_cast<uint32_t>(dimensions[2]), warpX),
+        loader->vkCmdDispatch(commandBuffer, divideRoundUp(static_cast<uint32_t>(dimensions[2]), warpX * tilePixels),
                               divideRoundUp(static_cast<uint32_t>(dimensions[1]), warpY),
                               static_cast<uint32_t>(dimensions[0]) *
                                   divideRoundUp(divideRoundUp(static_cast<uint32_t>(dimensions[3]), 4), tileGroups));
@@ -2982,32 +3040,46 @@ void GraphPipeline::makeConv2D(const std::shared_ptr<TensorDescriptor> &input,
     uint32_t tileInputWords = 0;
     uint32_t tileWeightWords = 0;
     uint32_t tileGroups = 1;
-    const char *const disableTiles = std::getenv("VMEL_DISABLE_CONV_TILES");
+    uint32_t tilePixels = 1;
+    static const bool disableTiles = []() {
+        const char *const value = std::getenv("VMEL_DISABLE_CONV_TILES");
+        return value != nullptr && std::string_view(value) != "0";
+    }();
     const VkFormat sumFormat = tail != nullptr ? tail->inputFormat : output->getFormat();
     const bool int8Tiles = input->getFormat() == VK_FORMAT_R8_SINT && weights->getFormat() == VK_FORMAT_R8_SINT &&
                            accTypeVkFormat(accType) == VK_FORMAT_R32_SINT && sumFormat == VK_FORMAT_R32_SINT;
     const bool floatTiles = tail == nullptr && input->getFormat() == VK_FORMAT_R32_SFLOAT &&
                             weights->getFormat() == VK_FORMAT_R32_SFLOAT &&
                             accTypeVkFormat(accType) == VK_FORMAT_R32_SFLOAT && sumFormat == VK_FORMAT_R32_SFLOAT;
-    if ((disableTiles == nullptr || std::string_view(disableTiles) == "0") && (int8Tiles || floatTiles) &&
-        output->getRank() == 4) {
+    if (!disableTiles && (int8Tiles || floatTiles) && output->getRank() == 4) {
         VkPhysicalDeviceProperties properties;
         loader->vkGetPhysicalDeviceProperties(physicalDevice, &properties);
         const auto &outputDimensions = output->getDimensions();
         constexpr uint64_t maxTileGroups = 4;
         const uint64_t channelGroups = (static_cast<uint64_t>(outputDimensions[3]) + 3) / 4;
+        const uint32_t wantedPixels = int8Tiles && hasIntegerDotProduct() ? 2u : 1u;
         bool fits = false;
-        for (tileGroups = static_cast<uint32_t>(channelGroups < maxTileGroups ? channelGroups : maxTileGroups);
-             tileGroups >= 1; tileGroups /= 2) {
-            const uint64_t workgroupsZ =
-                static_cast<uint64_t>(outputDimensions[0]) * ((channelGroups + tileGroups - 1) / tileGroups);
-            if (64u * tileGroups <= properties.limits.maxComputeWorkGroupInvocations &&
-                tileGroups <= properties.limits.maxComputeWorkGroupSize[2] &&
-                workgroupsZ <= properties.limits.maxComputeWorkGroupCount[2] &&
-                Conv2D::getTileWords(input, weights, stride, dilation, tileGroups,
-                                     properties.limits.maxComputeSharedMemorySize, int8Tiles ? 4u : 1u,
-                                     tileInputWords, tileWeightWords)) {
-                fits = true;
+        for (uint32_t pixelsTry = wantedPixels; !fits; pixelsTry /= 2) {
+            for (uint32_t groupsTry = static_cast<uint32_t>(channelGroups < maxTileGroups ? channelGroups : maxTileGroups);
+                 groupsTry >= 1; groupsTry /= 2) {
+                const uint64_t workgroupsZ =
+                    static_cast<uint64_t>(outputDimensions[0]) * ((channelGroups + groupsTry - 1) / groupsTry);
+                if (64u * groupsTry <= properties.limits.maxComputeWorkGroupInvocations &&
+                    groupsTry <= properties.limits.maxComputeWorkGroupSize[2] &&
+                    workgroupsZ <= properties.limits.maxComputeWorkGroupCount[2] &&
+                    Conv2D::getTileWords(input, weights, stride, dilation, groupsTry,
+                                         properties.limits.maxComputeSharedMemorySize, int8Tiles ? 4u : 1u, pixelsTry,
+                                         tileInputWords, tileWeightWords)) {
+                    tileGroups = groupsTry;
+                    tilePixels = pixelsTry;
+                    fits = true;
+                    break;
+                }
+                if (groupsTry == 1u) {
+                    break;
+                }
+            }
+            if (fits || pixelsTry == 1u) {
                 break;
             }
         }
@@ -3015,12 +3087,13 @@ void GraphPipeline::makeConv2D(const std::shared_ptr<TensorDescriptor> &input,
             tileInputWords = 0;
             tileWeightWords = 0;
             tileGroups = 1;
+            tilePixels = 1;
         }
     }
     const bool tileDot = tileInputWords != 0 && int8Tiles && hasIntegerDotProduct();
     makePipeline<Conv2D>(input, output, weights, biases, pad, stride, dilation, inputZeroPoint, weightZeroPoint,
                          accType, debugName, tail,
-                         tileInputWords, tileWeightWords, tileGroups, tileDot);
+                         tileInputWords, tileWeightWords, tileGroups, tilePixels, tileDot);
 }
 
 void GraphPipeline::makeConv3D(const std::shared_ptr<TensorDescriptor> &input,
