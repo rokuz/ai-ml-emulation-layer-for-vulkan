@@ -144,30 +144,67 @@ OUT_COMP_T applyMax(COMP_T a, COMP_T b, uint nanMode)
 }
 
 void main() {
-    uint[RANK_OUT] index;
-    getDispatchIndex(outputData, index);
+    uint[RANK_OUT] shape;
+    if (DISPATCH_RANK == uint(RANK_OUT)) {
+        const uint dispatchShape[6] = uint[](DISPATCH_SHAPE_0, DISPATCH_SHAPE_1, DISPATCH_SHAPE_2, DISPATCH_SHAPE_3,
+                                             DISPATCH_SHAPE_4, DISPATCH_SHAPE_5);
+        for (uint i = 0; i < RANK_OUT; i++) {
+            shape[i] = dispatchShape[i];
+        }
+    } else {
+        getShape(shape, outputData);
+    }
 
-    // Input 1 tensorARM
+    const uint groups = (shape[RANK_OUT - 1] + 3u) / 4u;
+
+    uint dispatchOffset = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+    uint[RANK_OUT] index;
+    index[RANK_OUT - 1] = (dispatchOffset % groups) * 4u;
+    dispatchOffset /= groups;
+    for (int i = int(RANK_OUT) - 2; i >= 0; i--) {
+        index[i] = dispatchOffset % shape[i];
+        dispatchOffset /= shape[i];
+    }
+
+    if (dispatchOffset > 0) {
+        return;
+    }
+
     uint[RANK_IN] inputShape1;
     uint[RANK_IN] inputIndex1;
-    IN_T value1Raw;
+    IN_T value1Raw[4];
 
     getShape(inputShape1, inputData1);
     applyBroadcast(inputShape1, index, inputIndex1);
-    tensorReadARM(inputData1, inputIndex1, value1Raw);
+    if (inputShape1[RANK_IN - 1] == 1u) {
+        IN_T broadcast1;
+        tensorReadARM(inputData1, inputIndex1, broadcast1);
+        value1Raw = IN_T[4](broadcast1, broadcast1, broadcast1, broadcast1);
+    } else {
+        tensorReadARM(inputData1, inputIndex1, value1Raw);
+    }
 
     // Input 2 tensorARM
     uint[RANK_IN] inputShape2;
     uint[RANK_IN] inputIndex2;
-    IN_T value2Raw;
+    IN_T value2Raw[4];
 
     getShape(inputShape2, inputData2);
     applyBroadcast(inputShape2, index, inputIndex2);
-    tensorReadARM(inputData2, inputIndex2, value2Raw);
+    if (inputShape2[RANK_IN - 1] == 1u) {
+        IN_T broadcast2;
+        tensorReadARM(inputData2, inputIndex2, broadcast2);
+        value2Raw = IN_T[4](broadcast2, broadcast2, broadcast2, broadcast2);
+    } else {
+        tensorReadARM(inputData2, inputIndex2, value2Raw);
+    }
 
-    COMP_T value1 = DECODE_STORAGE_TO_COMP(value1Raw, TYPE_IN, COMP_T);
-    COMP_T value2 = DECODE_STORAGE_TO_COMP(value2Raw, TYPE_IN, COMP_T);
-    OUT_T value = ENCODE_COMP_TO_STORAGE_RNE(%operation%, OUT_T, TYPE_OUT);
+    OUT_T value[4];
+    for (uint k = 0; k < 4; k++) {
+        COMP_T value1 = DECODE_STORAGE_TO_COMP(value1Raw[k], TYPE_IN, COMP_T);
+        COMP_T value2 = DECODE_STORAGE_TO_COMP(value2Raw[k], TYPE_IN, COMP_T);
+        value[k] = ENCODE_COMP_TO_STORAGE_RNE(%operation%, OUT_T, TYPE_OUT);
+    }
 
     tensorWriteARM(outputData, index, value);
 }

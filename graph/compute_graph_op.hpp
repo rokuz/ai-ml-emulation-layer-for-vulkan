@@ -594,6 +594,8 @@ class ElementwiseBinary : public ComputePipeline {
                             const std::shared_ptr<TensorDescriptor> &output, const std::string &debugName,
                             const std::string_view &operation) const;
 
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     PushConstant pushConstant;
     static constexpr std::string_view shaderName = "elementwise_binary";
 };
@@ -616,6 +618,8 @@ class ElementwiseUnary : public ComputePipeline {
     SpirvBinary createSpirv(const std::shared_ptr<PipelineCache> &pipelineCache,
                             const std::shared_ptr<TensorDescriptor> &output, const std::string &debugName,
                             const std::string_view &operation) const;
+
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
 
     static constexpr std::string_view shaderName = "elementwise_unary";
 };
