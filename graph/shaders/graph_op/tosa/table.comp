@@ -37,16 +37,39 @@ int32_t lookup(int16_t value) {
 }
 
 void main() {
-    uint[RANK] index;
-    getDispatchIndex(outputData, index);
+    uint[RANK] shape;
+    if (DISPATCH_RANK == uint(RANK)) {
+        const uint dispatchShape[6] = uint[](DISPATCH_SHAPE_0, DISPATCH_SHAPE_1, DISPATCH_SHAPE_2, DISPATCH_SHAPE_3,
+                                             DISPATCH_SHAPE_4, DISPATCH_SHAPE_5);
+        for (uint i = 0; i < RANK; i++) {
+            shape[i] = dispatchShape[i];
+        }
+    } else {
+        getShape(shape, outputData);
+    }
 
-    IN_T value;
+    const uint groups = (shape[RANK - 1] + 3u) / 4u;
+
+    uint dispatchOffset = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+    uint[RANK] index;
+    index[RANK - 1] = (dispatchOffset % groups) * 4u;
+    dispatchOffset /= groups;
+    for (int i = int(RANK) - 2; i >= 0; i--) {
+        index[i] = dispatchOffset % shape[i];
+        dispatchOffset /= shape[i];
+    }
+
+    if (dispatchOffset > 0) {
+        return;
+    }
+
+    IN_T value[4];
     tensorReadARM(inputData, index, value);
 
-#ifdef EXPERIMENTAL_MOLTEN_VK_SUPPORT
-    OUT_T outValue = OUT_T(lookup(value));
+    OUT_T outValue[4];
+    for (uint k = 0; k < 4; k++) {
+        outValue[k] = OUT_T(lookup(value[k]));
+    }
+
     tensorWriteARM(outputData, index, outValue);
-#else
-    tensorWriteARM(outputData, index, OUT_T(lookup(value)));
-#endif
 }
