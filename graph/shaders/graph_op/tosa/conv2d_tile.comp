@@ -94,20 +94,19 @@ void main() {
         const uint ty = p / tileWidth;
         const int y = tileY + int(ty);
         const int x = tileX + int(p - ty * tileWidth);
-        const uint base = p * words;
         if (uint(y) < inputHeight && uint(x) < inputWidth) {
             for (uint word = 0u; word < words; word++) {
                 const uint ic = word * 4u;
                 IN_T value[4];
                 tensorReadARM(inputData, uint[](n, uint(y), uint(x), ic), value);
-                tileInput[base + word] = packTileWord(int(value[0]),
-                                                      ic + 1u < inputChannels ? int(value[1]) : inputZeroPoint,
-                                                      ic + 2u < inputChannels ? int(value[2]) : inputZeroPoint,
-                                                      ic + 3u < inputChannels ? int(value[3]) : inputZeroPoint);
+                tileInput[word * tilePixels + p] = packTileWord(int(value[0]),
+                                                                ic + 1u < inputChannels ? int(value[1]) : inputZeroPoint,
+                                                                ic + 2u < inputChannels ? int(value[2]) : inputZeroPoint,
+                                                                ic + 3u < inputChannels ? int(value[3]) : inputZeroPoint);
             }
         } else {
             for (uint word = 0u; word < words; word++) {
-                tileInput[base + word] = paddingWord;
+                tileInput[word * tilePixels + p] = paddingWord;
             }
         }
     }
@@ -144,10 +143,10 @@ void main() {
     for (uint ky = 0u; ky < kernelHeight; ky++) {
         const uint row = (ly * strideY + ky * dilationY) * tileWidth + lx * strideX;
         for (uint kx = 0u; kx < kernelWidth; kx++) {
-            const uint inputBase = (row + kx * dilationX) * words;
+            const uint inputPixel = row + kx * dilationX;
             const uint weightBase = (ky * kernelWidth + kx) * words;
             for (uint word = 0u; word < words; word++) {
-                const ivec4 value = unpackTileWord(tileInput[inputBase + word]) - inputZeroPoint;
+                const ivec4 value = unpackTileWord(tileInput[word * tilePixels + inputPixel]) - inputZeroPoint;
                 const uint weightWord = gl_LocalInvocationID.z * 4u * cellWords + weightBase + word;
                 acc += ivec4(tileDot(value, unpackTileWord(tileWeights[weightWord]) - weightZeroPoint),
                              tileDot(value, unpackTileWord(tileWeights[cellWords + weightWord]) - weightZeroPoint),
