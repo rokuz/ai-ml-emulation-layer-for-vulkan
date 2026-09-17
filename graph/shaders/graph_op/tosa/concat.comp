@@ -18,8 +18,32 @@ layout(set = 0, binding = 0) uniform tensorARM<IN_OUT_T, RANK> outputData;
 layout(set = 1, binding = 0) uniform tensorARM<IN_OUT_T, RANK> inputData;
 
 void main() {
+    uint[RANK] shape;
+    if (DISPATCH_RANK == uint(RANK)) {
+        const uint dispatchShape[6] = uint[](DISPATCH_SHAPE_0, DISPATCH_SHAPE_1, DISPATCH_SHAPE_2, DISPATCH_SHAPE_3,
+                                             DISPATCH_SHAPE_4, DISPATCH_SHAPE_5);
+        for (uint i = 0; i < RANK; i++) {
+            shape[i] = dispatchShape[i];
+        }
+    } else {
+        getShape(shape, inputData);
+    }
+
+    const uint lastDim = shape[RANK - 1];
+    const uint groups = (lastDim + 3u) / 4u;
+
+    uint dispatchOffset = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x;
     uint[RANK] index;
-    getDispatchIndex(inputData, index);
+    index[RANK - 1] = (dispatchOffset % groups) * 4u;
+    dispatchOffset /= groups;
+    for (int i = int(RANK) - 2; i >= 0; i--) {
+        index[i] = dispatchOffset % shape[i];
+        dispatchOffset /= shape[i];
+    }
+
+    if (dispatchOffset > 0) {
+        return;
+    }
 
     uint[RANK] outputIndex;
     for (uint i = 0; i < outputIndex.length(); i++) {
@@ -28,7 +52,17 @@ void main() {
 
     outputIndex[(PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_0) : pushConstants.axis)] += (PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_1) : pushConstants.offset);
 
-    IN_OUT_T value;
-    tensorReadARM(inputData, index, value);
-    tensorWriteARM(outputData, outputIndex, value);
+    if (lastDim - index[RANK - 1] >= 4u) {
+        IN_OUT_T value[4];
+        tensorReadARM(inputData, index, value);
+        tensorWriteARM(outputData, outputIndex, value);
+    } else {
+        for (uint k = index[RANK - 1]; k < lastDim; k++) {
+            IN_OUT_T value;
+            tensorReadARM(inputData, index, value);
+            tensorWriteARM(outputData, outputIndex, value);
+            index[RANK - 1] += 1u;
+            outputIndex[RANK - 1] += 1u;
+        }
+    }
 }
