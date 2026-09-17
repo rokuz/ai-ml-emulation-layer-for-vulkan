@@ -11,7 +11,9 @@
 #include "spirv_pass_tosaspv_v100.hpp"
 #include "graph_log.hpp"
 
+#include <cstdlib>
 #include <cstring>
+#include <string_view>
 #include <spirv/unified1/ArmMotionEngine.100.h>
 #include <spirv/unified1/TOSA.001000.1.h>
 
@@ -38,6 +40,10 @@ void GraphPassTosaSpv100::handleGraph(const Graph *graph) {
                                      std::to_string(static_cast<unsigned>(opExtInst->opcode())));
         }
 
+        if (mergedInstructions.count(opExtInst.get()) != 0) {
+            continue;
+        }
+
         const auto &resultId = opExtInst->GetInOperand(0);
         const auto *importInstr = get_def_use_mgr()->GetDef(resultId.AsId());
         const auto &importName = importInstr->GetInOperand(0).AsString();
@@ -50,6 +56,67 @@ void GraphPassTosaSpv100::handleGraph(const Graph *graph) {
             throw std::runtime_error(std::string("Unsupported extension ") + importName);
         }
     }
+}
+
+std::optional<GraphPassTosaSpv100::FusedRescale>
+GraphPassTosaSpv100::findRescaleTail(const Instruction *producer) {
+    static const bool disabled = []() {
+        const char *const value = std::getenv("VMEL_DISABLE_OPERATOR_FUSION");
+        return value != nullptr && std::string_view(value) != "0";
+    }();
+    if (disabled) {
+        return std::nullopt;
+    }
+
+    Instruction *consumer = nullptr;
+    uint32_t uses = 0;
+    get_def_use_mgr()->ForEachUse(producer->result_id(), [&](Instruction *user, uint32_t) {
+        switch (user->opcode()) {
+        case spv::Op::OpName:
+        case spv::Op::OpDecorate:
+        case spv::Op::OpDecorateId:
+        case spv::Op::OpDecorateString:
+            return;
+        default:
+            consumer = user;
+            uses++;
+        }
+    });
+    if (uses != 1 || consumer->opcode() != spv::Op::OpExtInst ||
+        consumer->GetInOperand(0).AsId() != producer->GetInOperand(0).AsId() ||
+        TOSAInstructions(consumer->GetInOperand(1).words[0]) != TOSARESCALE || consumer->NumInOperands() != 12 ||
+        consumer->GetInOperand(7).AsId() != producer->result_id()) {
+        return std::nullopt;
+    }
+
+    if (getBoolConstant(consumer->GetInOperand(5)) || getBoolConstant(consumer->GetInOperand(6)) ||
+        getVkFormat(getTensorType(producer->result_id())->element_type()) != VK_FORMAT_R32_SINT) {
+        return std::nullopt;
+    }
+    const auto outputFormat = getVkFormat(getTensorType(consumer->result_id())->element_type());
+    if (outputFormat != VK_FORMAT_R8_SINT && outputFormat != VK_FORMAT_R16_SINT && outputFormat != VK_FORMAT_R32_SINT) {
+        return std::nullopt;
+    }
+
+    FusedRescale fused;
+    fused.rescale = consumer;
+    fused.tail.multiplier = getOrMakeCompositeTensor(consumer->GetInOperand(8).AsId());
+    fused.tail.shift = getOrMakeCompositeTensor(consumer->GetInOperand(9).AsId());
+    const auto multiplierFormat = fused.tail.multiplier->getFormat();
+    if ((multiplierFormat != VK_FORMAT_R16_SINT && multiplierFormat != VK_FORMAT_R32_SINT) ||
+        fused.tail.shift->getFormat() != VK_FORMAT_R8_SINT) {
+        return std::nullopt;
+    }
+    fused.tail.inputZeroPoint = getConstVector<int32_t>(consumer->GetInOperand(10))[0];
+    fused.tail.outputZeroPoint = getConstVector<int32_t>(consumer->GetInOperand(11))[0];
+    fused.tail.scale32 = getBoolConstant(consumer->GetInOperand(2));
+    fused.tail.doubleRound = getConstScalar<uint32_t>(consumer->GetInOperand(3)) == RoundingMode::DoubleRound;
+    fused.tail.perChannel = getBoolConstant(consumer->GetInOperand(4));
+
+    mergedInstructions.insert(consumer);
+    graphLog(Severity::Info) << "OpExtInst result=%" << consumer->result_id() << ",RESCALE merged into %"
+                             << producer->result_id() << std::endl;
+    return fused;
 }
 
 void GraphPassTosaSpv100::handleTosaInst(const Instruction *opExtInst) {
@@ -500,8 +567,10 @@ void GraphPassTosaSpv100::handleConv2D(const Instruction *opExtInst, const std::
                              << weightId.AsId() << ", bias=%" << biasId.AsId() << ", inputZeroPoint=" << inputZeroPoint
                              << ", weightZeroPoint=" << weightZeroPoint << std::endl;
 
-    graphPipeline.makeConv2D(getTensor(inputId), getTensor(*opExtInst), getTensor(weightId), getTensor(biasId), pad,
-                             stride, dilation, inputZeroPoint[0], weightZeroPoint[0], accType, debugName);
+    const auto fused = findRescaleTail(opExtInst);
+    graphPipeline.makeConv2D(getTensor(inputId), getTensor(fused ? *fused->rescale : *opExtInst), getTensor(weightId),
+                             getTensor(biasId), pad, stride, dilation, inputZeroPoint[0], weightZeroPoint[0], accType,
+                             debugName, fused ? &fused->tail : nullptr);
 }
 
 void GraphPassTosaSpv100::handleConv3D(const Instruction *opExtInst, const std::string &debugName) {
@@ -527,8 +596,10 @@ void GraphPassTosaSpv100::handleConv3D(const Instruction *opExtInst, const std::
                              << weightId.AsId() << ", bias=%" << biasId.AsId() << ", inputZeroPoint=" << inputZeroPoint
                              << ", weightZeroPoint=" << weightZeroPoint << std::endl;
 
-    graphPipeline.makeConv3D(getTensor(inputId), getTensor(*opExtInst), getTensor(weightId), getTensor(biasId), pad,
-                             stride, dilation, inputZeroPoint[0], weightZeroPoint[0], accType, debugName);
+    const auto fused = findRescaleTail(opExtInst);
+    graphPipeline.makeConv3D(getTensor(inputId), getTensor(fused ? *fused->rescale : *opExtInst), getTensor(weightId),
+                             getTensor(biasId), pad, stride, dilation, inputZeroPoint[0], weightZeroPoint[0], accType,
+                             debugName, fused ? &fused->tail : nullptr);
 }
 
 void GraphPassTosaSpv100::handleDepthwiseConv2D(const Instruction *opExtInst, const std::string &debugName) {
@@ -554,8 +625,10 @@ void GraphPassTosaSpv100::handleDepthwiseConv2D(const Instruction *opExtInst, co
                              << weightId.AsId() << ", bias=%" << biasId.AsId() << ", inputZeroPoint=" << inputZeroPoint
                              << ", weightZeroPoint=" << weightZeroPoint << std::endl;
 
-    graphPipeline.makeDepthwiseConv2D(getTensor(inputId), getTensor(*opExtInst), getTensor(weightId), getTensor(biasId),
-                                      pad, stride, dilation, inputZeroPoint[0], weightZeroPoint[0], accType, debugName);
+    const auto fused = findRescaleTail(opExtInst);
+    graphPipeline.makeDepthwiseConv2D(getTensor(inputId), getTensor(fused ? *fused->rescale : *opExtInst),
+                                      getTensor(weightId), getTensor(biasId), pad, stride, dilation, inputZeroPoint[0],
+                                      weightZeroPoint[0], accType, debugName, fused ? &fused->tail : nullptr);
 }
 
 void GraphPassTosaSpv100::handleElementwiseBinary(
@@ -638,8 +711,9 @@ void GraphPassTosaSpv100::handleMatmul(const Instruction *opExtInst, const std::
                              << ", input2=%" << inputId2.AsId() << ", input1ZeroPoint=" << input1ZeroPoint
                              << ", input2ZeroPoint=" << input2ZeroPoint << std::endl;
 
-    graphPipeline.makeMatmul(getTensor(inputId1), getTensor(inputId2), getTensor(*opExtInst), input1ZeroPoint[0],
-                             input2ZeroPoint[0], debugName);
+    const auto fused = findRescaleTail(opExtInst);
+    graphPipeline.makeMatmul(getTensor(inputId1), getTensor(inputId2), getTensor(fused ? *fused->rescale : *opExtInst),
+                             input1ZeroPoint[0], input2ZeroPoint[0], debugName, fused ? &fused->tail : nullptr);
 }
 
 void GraphPassTosaSpv100::handleMaximum(const Instruction *opExtInst, const std::string &debugName) {
@@ -1055,8 +1129,10 @@ void GraphPassTosaSpv100::handleTransposeConv2D(const Instruction *opExtInst, co
                              << biasId.AsId() << ", inputZeroPoint=" << inputZeroPoint
                              << ", weightZeroPoint=" << weightZeroPoint << std::endl;
 
-    graphPipeline.makeTransposeConv2D(getTensor(inputId), getTensor(*opExtInst), getTensor(weightId), getTensor(biasId),
-                                      outPad, stride, inputZeroPoint[0], weightZeroPoint[0], accType, debugName);
+    const auto fused = findRescaleTail(opExtInst);
+    graphPipeline.makeTransposeConv2D(getTensor(inputId), getTensor(fused ? *fused->rescale : *opExtInst),
+                                      getTensor(weightId), getTensor(biasId), outPad, stride, inputZeroPoint[0],
+                                      weightZeroPoint[0], accType, debugName, fused ? &fused->tail : nullptr);
 }
 
 void GraphPassTosaSpv100::handleMinSad(const Instruction *opExtInst, const std::string &debugName) {

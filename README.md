@@ -200,6 +200,14 @@ saved only as a queryable data graph pipeline property.
 export VMEL_GRAPH_PROFILING=1
 ```
 
+CONV2D, CONV3D, DEPTHWISE_CONV2D, TRANSPOSE_CONV2D and MATMUL with an int32 output write the result of a RESCALE
+directly when that RESCALE is the only consumer of their output, so that the intermediate tensor is neither written
+nor allocated. Set `VMEL_DISABLE_OPERATOR_FUSION` to run every operator separately.
+
+```shell
+export VMEL_DISABLE_OPERATOR_FUSION=1
+```
+
 The profiling property returns JSON with a `samples` array containing one entry
 per profiled internal compute dispatch, including `pipeline_kind`,
 `operator_name`, raw cycle counts, and `time_ms`, plus a `by_operator` summary

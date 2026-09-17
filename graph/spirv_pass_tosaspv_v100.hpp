@@ -13,6 +13,9 @@
 #include "compute_graph_op.hpp"
 #include "spirv_pass.hpp"
 
+#include <optional>
+#include <set>
+
 static constexpr std::string_view tosaSpv100 = "TOSA.001000.1";
 static constexpr std::string_view motionEngine100 = "Arm.MotionEngine.100";
 
@@ -86,6 +89,13 @@ class GraphPassTosaSpv100 final : public GraphPassBase {
     void handleMinSad(const Instruction *opExtInst, const std::string &debugName);
     void handleMinSadCost(const Instruction *opExtInst, const std::string &debugName);
     void handleRawSad(const Instruction *opExtInst, const std::string &debugName);
+
+    struct FusedRescale {
+        const Instruction *rescale = nullptr;
+        RescaleTail tail;
+    };
+    std::optional<FusedRescale> findRescaleTail(const Instruction *producer);
+    std::set<const Instruction *> mergedInstructions;
 };
 
 } // namespace spvtools::opt
