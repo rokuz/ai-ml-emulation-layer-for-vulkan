@@ -242,6 +242,23 @@ Graph profiling requires a queue family with non-zero `timestampValidBits`.
 When the selected Vulkan® driver does not expose timestamp queries, graph
 execution remains available but no timestamp samples can be collected.
 
+CONV2D, CONV3D, DEPTHWISE_CONV2D, TRANSPOSE_CONV2D and MATMUL with an int32
+output write the result of a RESCALE directly when that RESCALE is the only
+consumer of their output, so that the intermediate tensor is neither written nor
+allocated. Set `VMEL_DISABLE_OPERATOR_FUSION` to run every operator separately.
+
+Using **shell**:
+
+```shell
+export VMEL_DISABLE_OPERATOR_FUSION=1
+```
+
+Using **PowerShell**:
+
+```powershell
+$env:VMEL_DISABLE_OPERATOR_FUSION="1"
+```
+
 ## Usage on Linux
 
 You can enable the graph and tensor layers using environment variables only,

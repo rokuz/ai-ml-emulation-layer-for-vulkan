@@ -1,0 +1,122 @@
+/*
+ * SPDX-FileCopyrightText: Copyright 2023-2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#define IN_T %in_t%
+#define OUT_T %out_t%
+#define TAIL_OUT_T %tail_out_t%
+#define TAIL_MUL_T %tail_mul_t%
+#define TYPE_IN %in_t_type%
+#define TYPE_OUT %out_t_type%
+
+#if IS_FLOAT8(TYPE_IN) || IS_FLOAT8(TYPE_OUT)
+    #define COMP_T float16_t
+#elif IS_BFLOAT(TYPE_IN) || IS_BFLOAT(TYPE_OUT)
+    #define COMP_T float
+#else
+    #define COMP_T OUT_T
+#endif
+
+layout(local_size_x = %warpX%) in;
+
+layout(push_constant) uniform PushConstants {
+    int32_t inputZeroPoint1;
+    int32_t inputZeroPoint2;
+} pushConstants;
+
+layout(set = 0, binding = 0) uniform tensorARM<TAIL_OUT_T, 3> outputData;   // [N, H, W]
+layout(set = 1, binding = 0) uniform tensorARM<IN_T, 3> inputData1;    // [N, H, C]
+layout(set = 2, binding = 0) uniform tensorARM<IN_T, 3> inputData2;    // [N, C, W]
+
+layout(constant_id = 0) const uint32_t TAIL_SCALE32 = 0;
+layout(constant_id = 1) const uint32_t TAIL_DOUBLE_ROUND = 0;
+layout(constant_id = 2) const uint32_t TAIL_PER_CHANNEL = 0;
+layout(constant_id = 3) const int32_t TAIL_INPUT_ZERO_POINT = 0;
+layout(constant_id = 4) const int32_t TAIL_OUTPUT_ZERO_POINT = 0;
+
+layout(set = 3, binding = 0) uniform tensorARM<TAIL_MUL_T, 1> tailMultiplier;
+layout(set = 4, binding = 0) uniform tensorARM<int8_t, 1> tailShift;
+
+int32_t tailApplyScale(int64_t value, int32_t multiplier, int8_t shift, bool doubleRound) {
+    int64_t round = int64_t(1) << (shift - 1);
+
+    if (doubleRound) {
+        if (shift > 31) {
+            if (value >= 0) {
+                round += 1 << 30;
+            }
+            else {
+                round -= 1 << 30;
+            }
+        }
+    }
+
+    int64_t result = value * multiplier;
+    result += round;
+    result >>= shift;
+
+    return int32_t(result);
+}
+
+#define rescaleTail(inValue, channel, outValue)                                                                        \
+    {                                                                                                                  \
+        const uint tailChannel = TAIL_PER_CHANNEL != 0 ? uint(channel) : uint(0);                                      \
+        const int64_t tailInput = int64_t(inValue) - int64_t(OUT_T(TAIL_INPUT_ZERO_POINT));                            \
+        TAIL_MUL_T tailMultiplierValue;                                                                                \
+        tensorReadARM(tailMultiplier, uint[1](tailChannel), tailMultiplierValue);                                      \
+        int8_t tailShiftValue;                                                                                         \
+        tensorReadARM(tailShift, uint[1](tailChannel), tailShiftValue);                                                \
+        int32_t tailResult = tailApplyScale(tailInput, int32_t(tailMultiplierValue), tailShiftValue,                   \
+                                            TAIL_SCALE32 != 0 && TAIL_DOUBLE_ROUND != 0);                              \
+        tailResult += TAIL_OUT_T(TAIL_OUTPUT_ZERO_POINT);                                                              \
+        tailResult = int32_t(clamp(tailResult, TAIL_OUT_T(%tail_out_t_lowest%), TAIL_OUT_T(%tail_out_t_max%)));        \
+        outValue = TAIL_OUT_T(tailResult);                                                                             \
+    }
+
+void main() {
+    uint[3] index;
+    getDispatchIndex3(outputData, index);
+
+    uint on = index[0];
+    uint oy = index[1];
+    uint ox = index[2];
+
+    COMP_T acc = COMP_T(0);
+
+    const uint IC = tensorSizeARM(inputData1, 2);
+
+    uint c = 0;
+    for (; c + 3 < IC; c += 4) {
+        IN_T value1[4];
+        tensorReadARM(inputData1, uint[](on, oy, c), value1);
+
+        IN_T value20, value21, value22, value23;
+        tensorReadARM(inputData2, uint[](on, c, ox), value20);
+        tensorReadARM(inputData2, uint[](on, c + 1, ox), value21);
+        tensorReadARM(inputData2, uint[](on, c + 2, ox), value22);
+        tensorReadARM(inputData2, uint[](on, c + 3, ox), value23);
+        IN_T value2[4] = {value20, value21, value22, value23};
+
+        for (uint idx = 0; idx < 4; ++idx) {
+            COMP_T val1 = DECODE_STORAGE_TO_COMP(value1[idx], TYPE_IN, COMP_T) - COMP_T((PUSH_WORDS_VALID != 0 ? PUSH_WORD_0 : pushConstants.inputZeroPoint1));
+            COMP_T val2 = DECODE_STORAGE_TO_COMP(value2[idx], TYPE_IN, COMP_T) - COMP_T((PUSH_WORDS_VALID != 0 ? PUSH_WORD_1 : pushConstants.inputZeroPoint2));
+            acc += val1 * val2;
+        }
+    }
+
+    for (; c < IC; ++c) {
+        IN_T v1, v2;
+        tensorReadARM(inputData1, uint[](on, oy, c), v1);
+        tensorReadARM(inputData2, uint[](on, c, ox), v2);
+
+        COMP_T val1 = DECODE_STORAGE_TO_COMP(v1, TYPE_IN, COMP_T) - COMP_T((PUSH_WORDS_VALID != 0 ? PUSH_WORD_0 : pushConstants.inputZeroPoint1));
+        COMP_T val2 = DECODE_STORAGE_TO_COMP(v2, TYPE_IN, COMP_T) - COMP_T((PUSH_WORDS_VALID != 0 ? PUSH_WORD_1 : pushConstants.inputZeroPoint2));
+        acc += val1 * val2;
+    }
+
+    OUT_T outValue = ENCODE_COMP_TO_STORAGE(acc, OUT_T, TYPE_OUT);
+    TAIL_OUT_T tailValue;
+    rescaleTail(outValue, ox, tailValue)
+    tensorWriteARM(outputData, index, tailValue);
+}

@@ -273,6 +273,36 @@ foreach(OPERATION conv2d conv3d depthwise_conv2d transpose_conv2d)
     mlel_spv_convolution(${OPERATION} float8_e4m3_t float8_e4m3_t float8_e4m3_t float)
 endforeach()
 
+# Accumulating operators with the RESCALE that consumes their int32 output merged into them
+foreach(OPERATION conv2d conv3d depthwise_conv2d transpose_conv2d matmul)
+    set(WARP ${WARP1D})
+    if(${OPERATION} STREQUAL "conv2d")
+        set(WARP ${WARPX})
+    endif()
+    if(${OPERATION} STREQUAL "matmul")
+        set(TYPE_KEYS "int8_t_int")
+        set(TYPE_REPLACE REPLACE "in_t=int8_t" REPLACE "out_t=int")
+    else()
+        set(TYPE_KEYS "int8_t_int8_t_int_int")
+        set(TYPE_REPLACE REPLACE "in_t=int8_t" REPLACE "weight_t=int8_t" REPLACE "out_t=int" REPLACE "acc_t=int")
+    endif()
+    foreach(TAIL_OUT_T int8_t int16_t int)
+        foreach(TAIL_MUL_T int16_t int)
+            set(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${OPERATION}_rescale_${TYPE_KEYS}_${TAIL_OUT_T}_${TAIL_MUL_T}.spv")
+            mlel_generate_glsl(
+                INPUT "${CMAKE_CURRENT_BINARY_DIR}/${OPERATION}_rescale.comp"
+                OUTPUT ${OUTPUT}
+                REPLACE "warpX=${WARP}"
+                REPLACE "warpY=${WARPY}"
+                REPLACE "warpZ=${WARPZ}"
+                ${TYPE_REPLACE}
+                REPLACE "tail_out_t=${TAIL_OUT_T}"
+                REPLACE "tail_mul_t=${TAIL_MUL_T}")
+            list(APPEND SPV_FILES ${OUTPUT})
+        endforeach()
+    endforeach()
+endforeach()
+
 # Elementwise
 macro(mlel_spv_elementwise PIPELINE NAME OPERATION)
     foreach(IN_OUT_T ${ARGN})

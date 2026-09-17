@@ -14,6 +14,7 @@
 #include "graph_ext_inst_decoder.hpp"
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -25,6 +26,7 @@ namespace spvtools::opt {
 
 inline constexpr std::string_view tosaSpv100 = "TOSA.001000.1";
 using mlsdk::el::compute::graph_op::GraphPipeline;
+using mlsdk::el::compute::graph_op::RescaleTail;
 
 class GraphTosa10ExtInst final : public GraphExtInstDecoder {
   public:
@@ -80,6 +82,12 @@ class GraphTosa10ExtInst final : public GraphExtInstDecoder {
     void handleTile(const Instruction *opExtInst, const std::string &debugName) const;
     void handleTranspose(const Instruction *opExtInst, const std::string &debugName) const;
     void handleTransposeConv2D(const Instruction *opExtInst, const std::string &debugName) const;
+
+    struct FusedRescale {
+        const Instruction *rescale = nullptr;
+        RescaleTail tail;
+    };
+    std::optional<FusedRescale> findRescaleTail(const Instruction *producer) const;
 
     GraphExtInstContext &context;
 };

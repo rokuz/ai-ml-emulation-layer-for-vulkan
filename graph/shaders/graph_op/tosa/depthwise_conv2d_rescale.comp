@@ -1,0 +1,127 @@
+/*
+ * SPDX-FileCopyrightText: Copyright 2023-2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#define IN_T %in_t%
+#define OUT_T %out_t%
+#define TAIL_OUT_T %tail_out_t%
+#define TAIL_MUL_T %tail_mul_t%
+#define WEIGHT_T %weight_t%
+#define TYPE_IN %in_t_type%
+#define TYPE_OUT %out_t_type%
+#define TYPE_ACC %acc_t_type%
+#define ACC_T %acc_t%
+
+DEFINE_CONV_ACC_CASTS(ACC_T, OUT_T, TYPE_IN, TYPE_OUT)
+
+layout(local_size_x = %warpX%) in;
+
+layout(push_constant) uniform PushConstants {
+    int32_t inputZeroPoint;
+    int32_t weightZeroPoint;
+    int32_t pad[4];
+    int32_t stride[2];
+    int32_t dilation[2];
+} pushConstants;
+
+layout(set = 0, binding = 0) uniform tensorARM<TAIL_OUT_T, 4> outputData;       // [N, OH, OW, C * M]
+layout(set = 1, binding = 0) uniform tensorARM<IN_T, 4> inputData;         // [N, H, W, C]
+layout(set = 2, binding = 0) uniform tensorARM<WEIGHT_T, 4> weightsData;   // [KH, KW, C, M]
+layout(set = 3, binding = 0) uniform tensorARM<OUT_T, 1> biasesData;       // [BC]
+
+layout(constant_id = 0) const uint32_t TAIL_SCALE32 = 0;
+layout(constant_id = 1) const uint32_t TAIL_DOUBLE_ROUND = 0;
+layout(constant_id = 2) const uint32_t TAIL_PER_CHANNEL = 0;
+layout(constant_id = 3) const int32_t TAIL_INPUT_ZERO_POINT = 0;
+layout(constant_id = 4) const int32_t TAIL_OUTPUT_ZERO_POINT = 0;
+
+layout(set = 4, binding = 0) uniform tensorARM<TAIL_MUL_T, 1> tailMultiplier;
+layout(set = 5, binding = 0) uniform tensorARM<int8_t, 1> tailShift;
+
+int32_t tailApplyScale(int64_t value, int32_t multiplier, int8_t shift, bool doubleRound) {
+    int64_t round = int64_t(1) << (shift - 1);
+
+    if (doubleRound) {
+        if (shift > 31) {
+            if (value >= 0) {
+                round += 1 << 30;
+            }
+            else {
+                round -= 1 << 30;
+            }
+        }
+    }
+
+    int64_t result = value * multiplier;
+    result += round;
+    result >>= shift;
+
+    return int32_t(result);
+}
+
+#define rescaleTail(inValue, channel, outValue)                                                                        \
+    {                                                                                                                  \
+        const uint tailChannel = TAIL_PER_CHANNEL != 0 ? uint(channel) : uint(0);                                      \
+        const int64_t tailInput = int64_t(inValue) - int64_t(OUT_T(TAIL_INPUT_ZERO_POINT));                            \
+        TAIL_MUL_T tailMultiplierValue;                                                                                \
+        tensorReadARM(tailMultiplier, uint[1](tailChannel), tailMultiplierValue);                                      \
+        int8_t tailShiftValue;                                                                                         \
+        tensorReadARM(tailShift, uint[1](tailChannel), tailShiftValue);                                                \
+        int32_t tailResult = tailApplyScale(tailInput, int32_t(tailMultiplierValue), tailShiftValue,                   \
+                                            TAIL_SCALE32 != 0 && TAIL_DOUBLE_ROUND != 0);                              \
+        tailResult += TAIL_OUT_T(TAIL_OUTPUT_ZERO_POINT);                                                              \
+        tailResult = int32_t(clamp(tailResult, TAIL_OUT_T(%tail_out_t_lowest%), TAIL_OUT_T(%tail_out_t_max%)));        \
+        outValue = TAIL_OUT_T(tailResult);                                                                             \
+    }
+
+void main() {
+    uint[4] index;
+    getDispatchIndex4(outputData, index);
+
+    const uint n = index[0];
+    const uint oy = index[1];
+    const uint ox = index[2];
+    const uint ocm = index[3];
+    const uint c = ocm / tensorSizeARM(weightsData, 3);
+    const uint m = ocm % tensorSizeARM(weightsData, 3);
+
+    const uint iy = oy * (PUSH_WORDS_VALID != 0 ? int[2](PUSH_WORD_6, PUSH_WORD_7)[0] : pushConstants.stride[0]) - (PUSH_WORDS_VALID != 0 ? int[4](PUSH_WORD_2, PUSH_WORD_3, PUSH_WORD_4, PUSH_WORD_5)[0] : pushConstants.pad[0]);
+    const uint ix = ox * (PUSH_WORDS_VALID != 0 ? int[2](PUSH_WORD_6, PUSH_WORD_7)[1] : pushConstants.stride[1]) - (PUSH_WORDS_VALID != 0 ? int[4](PUSH_WORD_2, PUSH_WORD_3, PUSH_WORD_4, PUSH_WORD_5)[2] : pushConstants.pad[2]);
+
+    ACC_T acc = ACC_T(0);
+
+    for (uint ky = 0; ky < tensorSizeARM(weightsData, 0); ky++) {
+        for (uint kx = 0; kx < tensorSizeARM(weightsData, 1); kx++) {
+            const uint y = iy + ky * (PUSH_WORDS_VALID != 0 ? int[2](PUSH_WORD_8, PUSH_WORD_9)[0] : pushConstants.dilation[0]);
+            const uint x = ix + kx * (PUSH_WORDS_VALID != 0 ? int[2](PUSH_WORD_8, PUSH_WORD_9)[1] : pushConstants.dilation[1]);
+
+            if (y < tensorSizeARM(inputData, 1) && x < tensorSizeARM(inputData, 2)) {
+                IN_T tempValue;
+                uint index[] = {n, y, x, c};
+                tensorReadARM(inputData, index, tempValue);
+                ACC_T value = to_acc(tempValue);
+
+                WEIGHT_T tempWeight;
+                uint weightIndex[] = {ky, kx, c, m};
+                tensorReadARM(weightsData, weightIndex, tempWeight);
+                ACC_T weight = to_acc(tempWeight);
+
+                ACC_T outValue = ACC_T(value) - ACC_T((PUSH_WORDS_VALID != 0 ? PUSH_WORD_0 : pushConstants.inputZeroPoint));
+                ACC_T outWeight = ACC_T(weight) - ACC_T((PUSH_WORDS_VALID != 0 ? PUSH_WORD_1 : pushConstants.weightZeroPoint));
+
+                acc += outValue * outWeight;
+            }
+        }
+    }
+
+    OUT_T bias;
+    tensorReadARM(biasesData, uint[](tensorSizeARM(biasesData, 0) == 1 ? 0 : ocm), bias);
+    ACC_T bias_acc = to_acc(bias);
+    ACC_T sum = bias_acc + acc;
+    OUT_T outVal = acc_to_out(sum, OUT_T(0));
+
+    TAIL_OUT_T tailValue;
+    rescaleTail(outVal, ocm, tailValue)
+    tensorWriteARM(outputData, index, tailValue);
+}
