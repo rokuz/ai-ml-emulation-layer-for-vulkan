@@ -959,6 +959,8 @@ class Resize : public ComputePipeline {
                             const std::shared_ptr<TensorDescriptor> &input,
                             const std::shared_ptr<TensorDescriptor> &output) const;
 
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     PushConstant pushConstant;
 
     static constexpr std::string_view shaderName = "resize";
