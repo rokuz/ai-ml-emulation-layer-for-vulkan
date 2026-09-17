@@ -937,7 +937,11 @@ DescriptorMap Concat::createDescriptorMap(const std::shared_ptr<TensorDescriptor
 
 void Concat::cmdDispatch(VkCommandBuffer commandBuffer) {
     const auto &tensor = pipelineLayout->getTensorForSet(1);
-    const auto &size = uint32_t(tensor->getShapeSize());
+    const auto &dimensions = tensor->getDimensions();
+    uint32_t size = divideRoundUp(static_cast<uint32_t>(dimensions.back()), 4u);
+    for (size_t i = 0; i + 1 < dimensions.size(); i++) {
+        size *= static_cast<uint32_t>(dimensions[i]);
+    }
 
     const auto groupCountX = static_cast<uint32_t>(std::ceil(std::sqrt(double(divideRoundUp(size, warp1D)))));
     const auto groupCountY = groupCountX;
