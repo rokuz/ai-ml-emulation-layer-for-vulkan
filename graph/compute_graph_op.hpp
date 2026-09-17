@@ -438,16 +438,16 @@ class Conv2D : public ComputePipeline {
            const std::vector<int32_t> &_stride, const std::vector<int32_t> &_dilation, int8_t _inputZeroPoint,
            int8_t _weightZeroPoint, uint32_t _accType, const std::array<uint32_t, 3> &_maxGroupCount,
            const std::string &debugName, const RescaleTail *_tail = nullptr, uint32_t _tileInputWords = 0,
-           uint32_t _tileWeightWords = 0, uint32_t _tileGroups = 1, bool _tileDot = false);
+           uint32_t _tileWeightWords = 0, uint32_t _tileGroups = 1, uint32_t _tilePixels = 1, bool _tileDot = false);
 
     static bool getTileWords(const std::shared_ptr<TensorDescriptor> &input,
                              const std::shared_ptr<TensorDescriptor> &weights, const std::vector<int32_t> &stride,
                              const std::vector<int32_t> &dilation, uint32_t groups, uint32_t sharedMemoryBytes,
-                             uint32_t valuesPerWord, uint32_t &inputWords,
+                             uint32_t valuesPerWord, uint32_t pixels, uint32_t &inputWords,
                              uint32_t &weightWords);
 
-    static void getTileGroupCounts(const std::shared_ptr<TensorDescriptor> &output, uint32_t &groupCountX,
-                                   uint32_t &groupCountY);
+    static void getTileGroupCounts(const std::shared_ptr<TensorDescriptor> &output, uint32_t pixels,
+                                   uint32_t &groupCountX, uint32_t &groupCountY);
 
   private:
     struct PushConstant {
@@ -472,7 +472,7 @@ class Conv2D : public ComputePipeline {
                             const std::shared_ptr<TensorDescriptor> &input,
                             const std::shared_ptr<TensorDescriptor> &output,
                             const std::shared_ptr<TensorDescriptor> &weights, uint32_t accType, const RescaleTail *tail,
-                            bool tiled, bool tileDot) const;
+                            bool tiled, bool tileDot, uint32_t tilePixels) const;
 
     void cmdDispatch(VkCommandBuffer commandBuffer) override;
 
@@ -480,6 +480,7 @@ class Conv2D : public ComputePipeline {
     std::array<uint32_t, 3> maxGroupCount;
     bool tiled;
     uint32_t tileGroups;
+    uint32_t tilePixels;
 
     static constexpr std::string_view shaderName = "conv2d";
     static constexpr std::string_view tailShaderName = "conv2d_rescale";
