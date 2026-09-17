@@ -428,7 +428,8 @@ class Conv2D : public ComputePipeline {
            const std::shared_ptr<TensorDescriptor> &_biases, const std::vector<int32_t> &_pad,
            const std::vector<int32_t> &_stride, const std::vector<int32_t> &_dilation, int8_t _inputZeroPoint,
            int8_t _weightZeroPoint, uint32_t _accType, const std::string &debugName, const RescaleTail *_tail = nullptr,
-           uint32_t _tileInputWords = 0, uint32_t _tileWeightWords = 0, uint32_t _tileGroups = 1);
+           uint32_t _tileInputWords = 0, uint32_t _tileWeightWords = 0, uint32_t _tileGroups = 1,
+           bool _tileDot = false);
 
     static bool getTileWords(const std::shared_ptr<TensorDescriptor> &input,
                              const std::shared_ptr<TensorDescriptor> &weights, const std::vector<int32_t> &stride,
@@ -458,7 +459,7 @@ class Conv2D : public ComputePipeline {
                             const std::shared_ptr<TensorDescriptor> &input,
                             const std::shared_ptr<TensorDescriptor> &output,
                             const std::shared_ptr<TensorDescriptor> &weights, uint32_t accType, const RescaleTail *tail,
-                            bool tiled) const;
+                            bool tiled, bool tileDot) const;
 
     void cmdDispatch(VkCommandBuffer commandBuffer) override;
 
@@ -470,6 +471,8 @@ class Conv2D : public ComputePipeline {
     static constexpr std::string_view tailShaderName = "conv2d_rescale";
     static constexpr std::string_view tileShaderName = "conv2d_tile";
     static constexpr std::string_view tailTileShaderName = "conv2d_rescale_tile";
+    static constexpr std::string_view tileDotShaderName = "conv2d_tile_dot";
+    static constexpr std::string_view tailTileDotShaderName = "conv2d_rescale_tile_dot";
 
     static const uint32_t warpX = 8;
     static const uint32_t warpY = 8;
@@ -1546,6 +1549,8 @@ class GraphPipeline {
 
     ComputeDescriptorSetMap getComputeDescriptorSetMap(const TensorDescriptorMap &filter) const;
 
+    bool hasIntegerDotProduct();
+
     std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> loader;
     VkPhysicalDevice physicalDevice;
     VkDevice device;
@@ -1555,6 +1560,8 @@ class GraphPipeline {
 
     // Device memory for constants
     std::vector<VkDeviceMemory> constantsDeviceMemory;
+
+    int integerDotProduct = -1;
 
     // Mapping from SPIR-V constant id to tensor
     std::map<uint32_t, std::shared_ptr<Tensor>> constTensorMap;

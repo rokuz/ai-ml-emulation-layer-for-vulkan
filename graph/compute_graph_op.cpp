@@ -984,6 +984,7 @@ SpecConstants tileConstants(const RescaleTail *tail, const uint32_t inputWords, 
         constants.push_back(inputWords);
         constants.push_back(weightWords);
         constants.push_back(groups);
+        constants.push_back(groups);
     }
     return constants;
 }
@@ -1000,10 +1001,11 @@ Conv2D::Conv2D(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoade
                const std::shared_ptr<TensorDescriptor> &_biases, const std::vector<int32_t> &_pad,
                const std::vector<int32_t> &_stride, const std::vector<int32_t> &_dilation, const int8_t _inputZeroPoint,
                const int8_t _weightZeroPoint, const uint32_t _accType, const std::string &debugName, const RescaleTail *_tail,
-               const uint32_t _tileInputWords, const uint32_t _tileWeightWords, const uint32_t _tileGroups)
+               const uint32_t _tileInputWords, const uint32_t _tileWeightWords, const uint32_t _tileGroups,
+               const bool _tileDot)
     : ComputePipeline(_loader, _device, createDescriptorMap(_input, _output, _weights, _biases, _tail),
                       {&pushConstant, sizeof(pushConstant)}, _pipelineCache,
-                      createSpirv(_pipelineCache, _input, _output, _weights, _accType, _tail, _tileInputWords != 0), debugName,
+                      createSpirv(_pipelineCache, _input, _output, _weights, _accType, _tail, _tileInputWords != 0, _tileDot), debugName,
                       tileConstants(_tail, _tileInputWords, _tileWeightWords, _tileGroups)),
       pushConstant{createPushConstant(_pad, _stride, _dilation, _inputZeroPoint, _weightZeroPoint)},
       tiled{_tileInputWords != 0}, tileGroups{_tileGroups} {}
@@ -1054,7 +1056,7 @@ SpirvBinary Conv2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
                                 const std::shared_ptr<TensorDescriptor> &input,
                                 const std::shared_ptr<TensorDescriptor> &output,
                                 const std::shared_ptr<TensorDescriptor> &weights, const uint32_t accType, const RescaleTail *tail,
-                                const bool tiled) const {
+                                const bool tiled, const bool tileDot) const {
     const auto *inType = getFormatInfo(input->getFormat());
     const auto *outType = getFormatInfo(tail != nullptr ? tail->inputFormat : output->getFormat());
     const auto *weightType = getFormatInfo(weights->getFormat());
@@ -1064,7 +1066,7 @@ SpirvBinary Conv2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
         const auto *tailOutType = getFormatInfo(output->getFormat());
         const auto *tailMulType = getFormatInfo(tail->multiplier->getFormat());
 
-        return _pipelineCache->lookup(tiled ? tailTileShaderName : tailShaderName,
+        return _pipelineCache->lookup(tiled ? (tileDot ? tailTileDotShaderName : tailTileShaderName) : tailShaderName,
                                       {
                                           inType->glslType,
                                           weightType->glslType,
@@ -1091,7 +1093,7 @@ SpirvBinary Conv2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
                                       });
     }
 
-    return _pipelineCache->lookup(tiled ? tileShaderName : shaderName,
+    return _pipelineCache->lookup(tiled ? (tileDot ? tileDotShaderName : tileShaderName) : shaderName,
                                   {
                                       inType->glslType,
                                       weightType->glslType,
@@ -2682,6 +2684,25 @@ ComputeDescriptorSetMap GraphPipeline::makeConstantsDescriptorSets() const {
     return getComputeDescriptorSetMap(filter);
 }
 
+bool GraphPipeline::hasIntegerDotProduct() {
+    if (integerDotProduct < 0) {
+        VkPhysicalDeviceVulkan13Features vulkan13Features{};
+        vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+        VkPhysicalDeviceFeatures2 features2{};
+        features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        features2.pNext = &vulkan13Features;
+        loader->vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+
+        const char *const disabled = std::getenv("VMEL_DISABLE_CONV_DOT");
+        integerDotProduct = vulkan13Features.shaderIntegerDotProduct == VK_TRUE &&
+                                    (disabled == nullptr || std::string_view(disabled) == "0")
+                                ? 1
+                                : 0;
+    }
+
+    return integerDotProduct == 1;
+}
+
 void GraphPipeline::makeDescriptorSetBinding(const uint32_t set, const uint32_t binding, const uint32_t arrayIndex,
                                              const VkTensorDescriptionARM &tensorDescription) {
     auto tensorDescriptor = std::make_shared<TensorDescriptor>(loader, physicalDevice, device, tensorDescription);
@@ -2898,9 +2919,10 @@ void GraphPipeline::makeConv2D(const std::shared_ptr<TensorDescriptor> &input,
             tileGroups = 1;
         }
     }
+    const bool tileDot = tileInputWords != 0 && hasIntegerDotProduct();
     makePipeline<Conv2D>(input, output, weights, biases, pad, stride, dilation, inputZeroPoint, weightZeroPoint,
                          accType, debugName, tail,
-                         tileInputWords, tileWeightWords, tileGroups);
+                         tileInputWords, tileWeightWords, tileGroups, tileDot);
 }
 
 void GraphPipeline::makeConv3D(const std::shared_ptr<TensorDescriptor> &input,

@@ -218,6 +218,14 @@ always use the direct kernel.
 export VMEL_DISABLE_CONV_TILES=1
 ```
 
+The tiled int8 kernels convolve with `dotPacked4x8EXT` on devices that support `shaderIntegerDotProduct`, which the
+layer enables when the device has it. Set `VMEL_DISABLE_CONV_DOT` to convolve without the integer dot product, as on a
+device that lacks the feature.
+
+```shell
+export VMEL_DISABLE_CONV_DOT=1
+```
+
 The profiling property returns JSON with a `samples` array containing one entry
 per profiled internal compute dispatch, including `pipeline_kind`,
 `operator_name`, raw cycle counts, and `time_ms`, plus a `by_operator` summary

@@ -856,6 +856,7 @@ class VulkanLayer {
         }
         layerVulkan13Feature.synchronization2 = queryVulkan13Feature.synchronization2;
         layerVulkan13Feature.maintenance4 = queryVulkan13Feature.maintenance4;
+        layerVulkan13Feature.shaderIntegerDotProduct = queryVulkan13Feature.shaderIntegerDotProduct;
         appendType(&newCreateInfo, &layerVulkan13Feature);
 
         auto getInstanceProcAddr = layerCreateInfo->u.pLayerInfo->pfnNextGetInstanceProcAddr;
