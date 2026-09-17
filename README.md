@@ -208,6 +208,16 @@ nor allocated. Set `VMEL_DISABLE_OPERATOR_FUSION` to run every operator separate
 export VMEL_DISABLE_OPERATOR_FUSION=1
 ```
 
+CONV2D over int8 or float32 with a matching accumulator runs from workgroup shared memory: a workgroup loads the input
+window under a tile of output pixels once, together with the weights of up to four output channel groups, and every
+invocation then convolves from shared memory only. The kernel is used when a tile fits into `maxComputeSharedMemorySize`
+and into the workgroup limits of the device, and the direct kernel is kept otherwise. Set `VMEL_DISABLE_CONV_TILES` to
+always use the direct kernel.
+
+```shell
+export VMEL_DISABLE_CONV_TILES=1
+```
+
 The profiling property returns JSON with a `samples` array containing one entry
 per profiled internal compute dispatch, including `pipeline_kind`,
 `operator_name`, raw cycle counts, and `time_ms`, plus a `by_operator` summary

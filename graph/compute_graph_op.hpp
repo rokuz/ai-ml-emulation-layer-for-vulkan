@@ -427,7 +427,13 @@ class Conv2D : public ComputePipeline {
            const std::shared_ptr<TensorDescriptor> &_output, const std::shared_ptr<TensorDescriptor> &_weights,
            const std::shared_ptr<TensorDescriptor> &_biases, const std::vector<int32_t> &_pad,
            const std::vector<int32_t> &_stride, const std::vector<int32_t> &_dilation, int8_t _inputZeroPoint,
-           int8_t _weightZeroPoint, uint32_t _accType, const std::string &debugName, const RescaleTail *_tail = nullptr);
+           int8_t _weightZeroPoint, uint32_t _accType, const std::string &debugName, const RescaleTail *_tail = nullptr,
+           uint32_t _tileInputWords = 0, uint32_t _tileWeightWords = 0);
+
+    static bool getTileWords(const std::shared_ptr<TensorDescriptor> &input,
+                             const std::shared_ptr<TensorDescriptor> &weights, const std::vector<int32_t> &stride,
+                             const std::vector<int32_t> &dilation, uint32_t sharedMemoryBytes, uint32_t &inputWords,
+                             uint32_t &weightWords);
 
   private:
     struct PushConstant {
@@ -450,14 +456,18 @@ class Conv2D : public ComputePipeline {
     SpirvBinary createSpirv(const std::shared_ptr<PipelineCache> &pipelineCache,
                             const std::shared_ptr<TensorDescriptor> &input,
                             const std::shared_ptr<TensorDescriptor> &output,
-                            const std::shared_ptr<TensorDescriptor> &weights, uint32_t accType, const RescaleTail *tail) const;
+                            const std::shared_ptr<TensorDescriptor> &weights, uint32_t accType, const RescaleTail *tail,
+                            bool tiled) const;
 
     void cmdDispatch(VkCommandBuffer commandBuffer) override;
 
     PushConstant pushConstant;
+    bool tiled;
 
     static constexpr std::string_view shaderName = "conv2d";
     static constexpr std::string_view tailShaderName = "conv2d_rescale";
+    static constexpr std::string_view tileShaderName = "conv2d_tile";
+    static constexpr std::string_view tailTileShaderName = "conv2d_rescale_tile";
 
     static const uint32_t warpX = 8;
     static const uint32_t warpY = 8;
