@@ -52,13 +52,13 @@ void main() {
         return;
     }
 
-    uint iy = oy * pushConstants.stride[0] - pushConstants.pad[0];
-    uint ix = ox * pushConstants.stride[1] - pushConstants.pad[2];
+    uint iy = oy * (PUSH_WORDS_VALID != 0 ? int[2](PUSH_WORD_6, PUSH_WORD_7)[0] : pushConstants.stride[0]) - (PUSH_WORDS_VALID != 0 ? int[4](PUSH_WORD_2, PUSH_WORD_3, PUSH_WORD_4, PUSH_WORD_5)[0] : pushConstants.pad[0]);
+    uint ix = ox * (PUSH_WORDS_VALID != 0 ? int[2](PUSH_WORD_6, PUSH_WORD_7)[1] : pushConstants.stride[1]) - (PUSH_WORDS_VALID != 0 ? int[4](PUSH_WORD_2, PUSH_WORD_3, PUSH_WORD_4, PUSH_WORD_5)[2] : pushConstants.pad[2]);
 
     for (uint ky = 0; ky < tensorSizeARM(weightsData, 1); ky++) {
         for (uint kx = 0; kx < tensorSizeARM(weightsData, 2); kx++) {
-            uint y = iy + ky * pushConstants.dilation[0];
-            uint x = ix + kx * pushConstants.dilation[1];
+            uint y = iy + ky * (PUSH_WORDS_VALID != 0 ? int[2](PUSH_WORD_8, PUSH_WORD_9)[0] : pushConstants.dilation[0]);
+            uint x = ix + kx * (PUSH_WORDS_VALID != 0 ? int[2](PUSH_WORD_8, PUSH_WORD_9)[1] : pushConstants.dilation[1]);
 
             if (y < tensorSizeARM(inputData, 1) && x < tensorSizeARM(inputData, 2)) {
                 const uint IC = tensorSizeARM(inputData, 3);
@@ -73,11 +73,11 @@ void main() {
                     tensorReadARM(weightsData, uint[](ocs[2], ky, kx, ic), weight[2]);
                     tensorReadARM(weightsData, uint[](ocs[3], ky, kx, ic), weight[3]);
 
-                    VEC4 outValue = value - pushConstants.inputZeroPoint;
-                    VEC4 outWeight0 = VEC4(CONV_TO_ACC_WEIGHT(weight[0][0]), CONV_TO_ACC_WEIGHT(weight[0][1]), CONV_TO_ACC_WEIGHT(weight[0][2]), CONV_TO_ACC_WEIGHT(weight[0][3])) - pushConstants.weightZeroPoint;
-                    VEC4 outWeight1 = VEC4(CONV_TO_ACC_WEIGHT(weight[1][0]), CONV_TO_ACC_WEIGHT(weight[1][1]), CONV_TO_ACC_WEIGHT(weight[1][2]), CONV_TO_ACC_WEIGHT(weight[1][3])) - pushConstants.weightZeroPoint;
-                    VEC4 outWeight2 = VEC4(CONV_TO_ACC_WEIGHT(weight[2][0]), CONV_TO_ACC_WEIGHT(weight[2][1]), CONV_TO_ACC_WEIGHT(weight[2][2]), CONV_TO_ACC_WEIGHT(weight[2][3])) - pushConstants.weightZeroPoint;
-                    VEC4 outWeight3 = VEC4(CONV_TO_ACC_WEIGHT(weight[3][0]), CONV_TO_ACC_WEIGHT(weight[3][1]), CONV_TO_ACC_WEIGHT(weight[3][2]), CONV_TO_ACC_WEIGHT(weight[3][3])) - pushConstants.weightZeroPoint;
+                    VEC4 outValue = value - (PUSH_WORDS_VALID != 0 ? PUSH_WORD_0 : pushConstants.inputZeroPoint);
+                    VEC4 outWeight0 = VEC4(CONV_TO_ACC_WEIGHT(weight[0][0]), CONV_TO_ACC_WEIGHT(weight[0][1]), CONV_TO_ACC_WEIGHT(weight[0][2]), CONV_TO_ACC_WEIGHT(weight[0][3])) - (PUSH_WORDS_VALID != 0 ? PUSH_WORD_1 : pushConstants.weightZeroPoint);
+                    VEC4 outWeight1 = VEC4(CONV_TO_ACC_WEIGHT(weight[1][0]), CONV_TO_ACC_WEIGHT(weight[1][1]), CONV_TO_ACC_WEIGHT(weight[1][2]), CONV_TO_ACC_WEIGHT(weight[1][3])) - (PUSH_WORDS_VALID != 0 ? PUSH_WORD_1 : pushConstants.weightZeroPoint);
+                    VEC4 outWeight2 = VEC4(CONV_TO_ACC_WEIGHT(weight[2][0]), CONV_TO_ACC_WEIGHT(weight[2][1]), CONV_TO_ACC_WEIGHT(weight[2][2]), CONV_TO_ACC_WEIGHT(weight[2][3])) - (PUSH_WORDS_VALID != 0 ? PUSH_WORD_1 : pushConstants.weightZeroPoint);
+                    VEC4 outWeight3 = VEC4(CONV_TO_ACC_WEIGHT(weight[3][0]), CONV_TO_ACC_WEIGHT(weight[3][1]), CONV_TO_ACC_WEIGHT(weight[3][2]), CONV_TO_ACC_WEIGHT(weight[3][3])) - (PUSH_WORDS_VALID != 0 ? PUSH_WORD_1 : pushConstants.weightZeroPoint);
 
                     VEC4 mul0 = outValue * outWeight0;
                     VEC4 mul1 = outValue * outWeight1;

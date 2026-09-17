@@ -23,16 +23,16 @@ layout(set = 1, binding = 0) uniform tensorARM<STORAGE_T, RANK> inputData;
 
 void main() {
     uint[RANK] index;
-    getIndex(outputData, index);
+    getDispatchIndex(outputData, index);
 
-    const uint dim = index[pushConstants.axis];
+    const uint dim = index[(PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_0) : pushConstants.axis)];
     COMP_T result = COMP_T(%init%);
 
     uint[RANK] inputShape;
     getShape(inputShape, inputData);
 
-    for (uint i = 0; i < inputShape[pushConstants.axis]; i++) {
-        index[pushConstants.axis] = i;
+    for (uint i = 0; i < inputShape[(PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_0) : pushConstants.axis)]; i++) {
+        index[(PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_0) : pushConstants.axis)] = i;
 
 #if IS_REDUCED_FLOAT(TYPE_IN_OUT)
         STORAGE_T rawValue;
@@ -45,11 +45,11 @@ void main() {
 
 #if (IS_FLOAT(TYPE_IN_OUT) || IS_REDUCED_FLOAT(TYPE_IN_OUT))
         if (isnan(value)) {
-            if (pushConstants.nanMode == NAN_MODE_IGNORE) {
+            if ((PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_1) : pushConstants.nanMode) == NAN_MODE_IGNORE) {
                 // Ignore value and continue
                 continue;
             }
-            if (pushConstants.nanMode == NAN_MODE_PROPAGATE) {
+            if ((PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_1) : pushConstants.nanMode) == NAN_MODE_PROPAGATE) {
                 // If any value is NaN, then the result must be NaN
                 result = value;
                 break;
@@ -60,7 +60,7 @@ void main() {
         result = %operation%;
     }
 
-    index[pushConstants.axis] = dim;
+    index[(PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_0) : pushConstants.axis)] = dim;
 
 #if IS_REDUCED_FLOAT(TYPE_IN_OUT)
     tensorWriteARM(outputData, index, ENCODE_COMP_TO_STORAGE(result, STORAGE_T, TYPE_IN_OUT));

@@ -52,7 +52,7 @@ int idivFloor(int numerator, int denominator) {
 
 void main() {
     uint[4] index;
-    getIndex4(outputData, index);
+    getDispatchIndex4(outputData, index);
 
     // Preserve the interpolation operation order on drivers where contraction or
     // reassociation can overflow intermediate values and produce Inf or NaN.
@@ -74,21 +74,21 @@ void main() {
     COMP_T unit_y = COMP_T(1.0);
     COMP_T unit_x = COMP_T(1.0);
 #else
-    int16_t unit_y = int16_t(pushConstants.scale.y.n);
-    int16_t unit_x = int16_t(pushConstants.scale.x.n);
+    int16_t unit_y = int16_t((PUSH_WORDS_VALID != 0 ? PUSH_WORD_0 : pushConstants.scale.y.n));
+    int16_t unit_x = int16_t((PUSH_WORDS_VALID != 0 ? PUSH_WORD_2 : pushConstants.scale.x.n));
 #endif
 
-    int32_t y = int32_t(oy * pushConstants.scale.y.d + pushConstants.offset.y);
-    int16_t iy = int16_t(idivFloor(y, pushConstants.scale.y.n));
-    int16_t ry = int16_t(y - iy * pushConstants.scale.y.n);
+    int32_t y = int32_t(oy * (PUSH_WORDS_VALID != 0 ? PUSH_WORD_1 : pushConstants.scale.y.d) + (PUSH_WORDS_VALID != 0 ? PUSH_WORD_4 : pushConstants.offset.y));
+    int16_t iy = int16_t(idivFloor(y, (PUSH_WORDS_VALID != 0 ? PUSH_WORD_0 : pushConstants.scale.y.n)));
+    int16_t ry = int16_t(y - iy * (PUSH_WORDS_VALID != 0 ? PUSH_WORD_0 : pushConstants.scale.y.n));
 
-    int32_t x = int32_t(ox * pushConstants.scale.x.d + pushConstants.offset.x);
-    int16_t ix = int16_t(idivFloor(x, pushConstants.scale.x.n));
-    int16_t rx = int16_t(x - ix * pushConstants.scale.x.n);
+    int32_t x = int32_t(ox * (PUSH_WORDS_VALID != 0 ? PUSH_WORD_3 : pushConstants.scale.x.d) + (PUSH_WORDS_VALID != 0 ? PUSH_WORD_5 : pushConstants.offset.x));
+    int16_t ix = int16_t(idivFloor(x, (PUSH_WORDS_VALID != 0 ? PUSH_WORD_2 : pushConstants.scale.x.n)));
+    int16_t rx = int16_t(x - ix * (PUSH_WORDS_VALID != 0 ? PUSH_WORD_2 : pushConstants.scale.x.n));
 
 #if IS_FLOAT(TYPE_OUT) || IS_BFLOAT(TYPE_OUT)
-    COMP_T dy = COMP_T(ry) / COMP_T(pushConstants.scale.y.n);
-    COMP_T dx = COMP_T(rx) / COMP_T(pushConstants.scale.x.n);
+    COMP_T dy = COMP_T(ry) / COMP_T((PUSH_WORDS_VALID != 0 ? PUSH_WORD_0 : pushConstants.scale.y.n));
+    COMP_T dx = COMP_T(rx) / COMP_T((PUSH_WORDS_VALID != 0 ? PUSH_WORD_2 : pushConstants.scale.x.n));
 #else
     int16_t dy = ry;
     int16_t dx = rx;
@@ -99,7 +99,7 @@ void main() {
     int16_t ix0 = int16_t(max(ix, 0));
     int16_t ix1 = int16_t(min(ix + 1, inputShape[2] - 1));
 
-    if (pushConstants.mode == BILINEAR) {
+    if ((PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_8) : pushConstants.mode) == BILINEAR) {
         IN_T v00;
         tensorReadARM(inputData, uint[](n, iy0, ix0, c), v00);
 
@@ -116,13 +116,13 @@ void main() {
         acc += DECODE_STORAGE_TO_COMP(v01, TYPE_IN, COMP_T) * COMP_T(unit_y - dy) * COMP_T(dx);
         acc += DECODE_STORAGE_TO_COMP(v10, TYPE_IN, COMP_T) * COMP_T(dy) * COMP_T(unit_x - dx);
         acc += DECODE_STORAGE_TO_COMP(v11, TYPE_IN, COMP_T) * COMP_T(dy) * COMP_T(dx);
-    } else if (pushConstants.mode == NEAREST) {
+    } else if ((PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_8) : pushConstants.mode) == NEAREST) {
 #if IS_FLOAT(TYPE_OUT) || IS_BFLOAT(TYPE_OUT)
         int32_t iy = (dy >= 0.5) ? iy1 : iy0;
         int32_t ix = (dx >= 0.5) ? ix1 : ix0;
 #else
-        int32_t iy = (2 * dy >= pushConstants.scale.y.n) ? iy1 : iy0;
-        int32_t ix = (2 * dx >= pushConstants.scale.x.n) ? ix1 : ix0;
+        int32_t iy = (2 * dy >= (PUSH_WORDS_VALID != 0 ? PUSH_WORD_0 : pushConstants.scale.y.n)) ? iy1 : iy0;
+        int32_t ix = (2 * dx >= (PUSH_WORDS_VALID != 0 ? PUSH_WORD_2 : pushConstants.scale.x.n)) ? ix1 : ix0;
 #endif
 
         IN_T value;

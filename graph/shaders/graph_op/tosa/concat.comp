@@ -19,14 +19,14 @@ layout(set = 1, binding = 0) uniform tensorARM<IN_OUT_T, RANK> inputData;
 
 void main() {
     uint[RANK] index;
-    getIndex(inputData, index);
+    getDispatchIndex(inputData, index);
 
     uint[RANK] outputIndex;
     for (uint i = 0; i < outputIndex.length(); i++) {
         outputIndex[i] = index[i];
     }
 
-    outputIndex[pushConstants.axis] += pushConstants.offset;
+    outputIndex[(PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_0) : pushConstants.axis)] += (PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_1) : pushConstants.offset);
 
     IN_OUT_T value;
     tensorReadARM(inputData, index, value);
