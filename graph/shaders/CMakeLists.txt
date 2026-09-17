@@ -303,6 +303,38 @@ foreach(OPERATION conv2d conv3d depthwise_conv2d transpose_conv2d matmul)
     endforeach()
 endforeach()
 
+# CONV2D over int8 input and weights with an int32 sum, tiled from workgroup shared memory
+set(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_tile_int8_t_int8_t_int_int.spv")
+mlel_generate_glsl(
+    INPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_tile.comp"
+    OUTPUT ${OUTPUT}
+    REPLACE "warpX=${WARPX}"
+    REPLACE "warpY=${WARPY}"
+    REPLACE "warpZ=${WARPZ}"
+    REPLACE "in_t=int8_t"
+    REPLACE "weight_t=int8_t"
+    REPLACE "out_t=int"
+    REPLACE "acc_t=int")
+list(APPEND SPV_FILES ${OUTPUT})
+foreach(TAIL_OUT_T int8_t int16_t int)
+    foreach(TAIL_MUL_T int16_t int)
+        set(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_rescale_tile_int8_t_int8_t_int_int_${TAIL_OUT_T}_${TAIL_MUL_T}.spv")
+        mlel_generate_glsl(
+            INPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_rescale_tile.comp"
+            OUTPUT ${OUTPUT}
+            REPLACE "warpX=${WARPX}"
+            REPLACE "warpY=${WARPY}"
+            REPLACE "warpZ=${WARPZ}"
+            REPLACE "in_t=int8_t"
+            REPLACE "weight_t=int8_t"
+            REPLACE "out_t=int"
+            REPLACE "acc_t=int"
+            REPLACE "tail_out_t=${TAIL_OUT_T}"
+            REPLACE "tail_mul_t=${TAIL_MUL_T}")
+        list(APPEND SPV_FILES ${OUTPUT})
+    endforeach()
+endforeach()
+
 # Elementwise
 macro(mlel_spv_elementwise PIPELINE NAME OPERATION)
     foreach(IN_OUT_T ${ARGN})
