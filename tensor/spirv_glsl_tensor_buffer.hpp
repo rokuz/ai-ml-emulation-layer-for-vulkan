@@ -31,6 +31,8 @@ class CompilerTensorAsBuffer : public spirv_cross::CompilerGLSL {
     static const int MAX_RANK = 6;
     // GLSL constanst and macros used to emulate tensor function, loaded from `shaders/tensor.glsl`
     static const std::string tensorDefines;
+    static const std::string tensorDefinesShortCircuit;
+    bool hasFloatTensors = false;
     // Used to keep track of SPIRV-Cross variables across `CompilerGLSL` function calls
     std::vector<std::pair<uint32_t, uint32_t>> tensorVariables;
     std::vector<uint32_t> tensorArrayVariables;
