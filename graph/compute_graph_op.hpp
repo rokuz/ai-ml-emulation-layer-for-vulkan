@@ -428,11 +428,12 @@ class Conv2D : public ComputePipeline {
            const std::shared_ptr<TensorDescriptor> &_biases, const std::vector<int32_t> &_pad,
            const std::vector<int32_t> &_stride, const std::vector<int32_t> &_dilation, int8_t _inputZeroPoint,
            int8_t _weightZeroPoint, uint32_t _accType, const std::string &debugName, const RescaleTail *_tail = nullptr,
-           uint32_t _tileInputWords = 0, uint32_t _tileWeightWords = 0);
+           uint32_t _tileInputWords = 0, uint32_t _tileWeightWords = 0, uint32_t _tileGroups = 1);
 
     static bool getTileWords(const std::shared_ptr<TensorDescriptor> &input,
                              const std::shared_ptr<TensorDescriptor> &weights, const std::vector<int32_t> &stride,
-                             const std::vector<int32_t> &dilation, uint32_t sharedMemoryBytes, uint32_t &inputWords,
+                             const std::vector<int32_t> &dilation, uint32_t groups, uint32_t sharedMemoryBytes,
+                             uint32_t &inputWords,
                              uint32_t &weightWords);
 
   private:
@@ -463,6 +464,7 @@ class Conv2D : public ComputePipeline {
 
     PushConstant pushConstant;
     bool tiled;
+    uint32_t tileGroups;
 
     static constexpr std::string_view shaderName = "conv2d";
     static constexpr std::string_view tailShaderName = "conv2d_rescale";

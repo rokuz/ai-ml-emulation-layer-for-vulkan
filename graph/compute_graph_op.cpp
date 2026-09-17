@@ -976,12 +976,14 @@ void appendRescaleTail(DescriptorMap &descriptorMap, const RescaleTail *tail) {
     }
 }
 
-SpecConstants tileConstants(const RescaleTail *tail, const uint32_t inputWords, const uint32_t weightWords) {
+SpecConstants tileConstants(const RescaleTail *tail, const uint32_t inputWords, const uint32_t weightWords,
+                            const uint32_t groups) {
     SpecConstants constants = rescaleTailConstants(tail);
     if (inputWords != 0) {
         constants.resize(5, 0);
         constants.push_back(inputWords);
         constants.push_back(weightWords);
+        constants.push_back(groups);
     }
     return constants;
 }
@@ -998,13 +1000,13 @@ Conv2D::Conv2D(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoade
                const std::shared_ptr<TensorDescriptor> &_biases, const std::vector<int32_t> &_pad,
                const std::vector<int32_t> &_stride, const std::vector<int32_t> &_dilation, const int8_t _inputZeroPoint,
                const int8_t _weightZeroPoint, const uint32_t _accType, const std::string &debugName, const RescaleTail *_tail,
-               const uint32_t _tileInputWords, const uint32_t _tileWeightWords)
+               const uint32_t _tileInputWords, const uint32_t _tileWeightWords, const uint32_t _tileGroups)
     : ComputePipeline(_loader, _device, createDescriptorMap(_input, _output, _weights, _biases, _tail),
                       {&pushConstant, sizeof(pushConstant)}, _pipelineCache,
                       createSpirv(_pipelineCache, _input, _output, _weights, _accType, _tail, _tileInputWords != 0), debugName,
-                      tileConstants(_tail, _tileInputWords, _tileWeightWords)),
+                      tileConstants(_tail, _tileInputWords, _tileWeightWords, _tileGroups)),
       pushConstant{createPushConstant(_pad, _stride, _dilation, _inputZeroPoint, _weightZeroPoint)},
-      tiled{_tileInputWords != 0} {}
+      tiled{_tileInputWords != 0}, tileGroups{_tileGroups} {}
 
 Conv2D::PushConstant Conv2D::createPushConstant(const std::vector<int32_t> &pad, const std::vector<int32_t> &stride,
                                                 const std::vector<int32_t> &dilation, const int8_t inputZeroPoint,
@@ -1112,7 +1114,8 @@ SpirvBinary Conv2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
 
 bool Conv2D::getTileWords(const std::shared_ptr<TensorDescriptor> &input, const std::shared_ptr<TensorDescriptor> &weights,
                           const std::vector<int32_t> &stride, const std::vector<int32_t> &dilation,
-                          const uint32_t sharedMemoryBytes, uint32_t &inputWords, uint32_t &weightWords) {
+                          const uint32_t groups, const uint32_t sharedMemoryBytes, uint32_t &inputWords,
+                          uint32_t &weightWords) {
     if (input->getRank() != 4 || weights->getRank() != 4 || stride.size() != 2 || dilation.size() != 2 || stride[0] < 1 ||
         stride[1] < 1 || dilation[0] < 1 || dilation[1] < 1) {
         return false;
@@ -1126,7 +1129,8 @@ bool Conv2D::getTileWords(const std::shared_ptr<TensorDescriptor> &input, const 
                                (static_cast<uint64_t>(weightDimensions[2]) - 1) * static_cast<uint64_t>(dilation[1]) + 1;
     const uint64_t tileInputWords = tileHeight * tileWidth * words;
     const uint64_t tileWeightWords =
-        4 * static_cast<uint64_t>(weightDimensions[1]) * static_cast<uint64_t>(weightDimensions[2]) * words;
+        4 * static_cast<uint64_t>(groups) * static_cast<uint64_t>(weightDimensions[1]) *
+        static_cast<uint64_t>(weightDimensions[2]) * words;
     if ((tileInputWords + tileWeightWords) * sizeof(uint32_t) > sharedMemoryBytes) {
         return false;
     }
@@ -1143,7 +1147,8 @@ void Conv2D::cmdDispatch(VkCommandBuffer commandBuffer) {
     if (tiled) {
         loader->vkCmdDispatch(commandBuffer, divideRoundUp(static_cast<uint32_t>(dimensions[2]), warpX),
                               divideRoundUp(static_cast<uint32_t>(dimensions[1]), warpY),
-                              static_cast<uint32_t>(dimensions[0]) * divideRoundUp(static_cast<uint32_t>(dimensions[3]), 4));
+                              static_cast<uint32_t>(dimensions[0]) *
+                                  divideRoundUp(divideRoundUp(static_cast<uint32_t>(dimensions[3]), 4), tileGroups));
         return;
     }
     loader->vkCmdDispatch(commandBuffer, divideRoundUp(static_cast<uint32_t>(dimensions[0] * dimensions[2]), warpX),
@@ -2862,6 +2867,7 @@ void GraphPipeline::makeConv2D(const std::shared_ptr<TensorDescriptor> &input,
                                const std::string &debugName, const RescaleTail *tail) {
     uint32_t tileInputWords = 0;
     uint32_t tileWeightWords = 0;
+    uint32_t tileGroups = 1;
     const char *const disableTiles = std::getenv("VMEL_DISABLE_CONV_TILES");
     const VkFormat sumFormat = tail != nullptr ? tail->inputFormat : output->getFormat();
     if ((disableTiles == nullptr || std::string_view(disableTiles) == "0") && input->getFormat() == VK_FORMAT_R8_SINT &&
@@ -2870,18 +2876,31 @@ void GraphPipeline::makeConv2D(const std::shared_ptr<TensorDescriptor> &input,
         VkPhysicalDeviceProperties properties;
         loader->vkGetPhysicalDeviceProperties(physicalDevice, &properties);
         const auto &outputDimensions = output->getDimensions();
-        const uint64_t channelGroups =
-            static_cast<uint64_t>(outputDimensions[0]) * ((static_cast<uint64_t>(outputDimensions[3]) + 3) / 4);
-        if (channelGroups > properties.limits.maxComputeWorkGroupCount[2] ||
-            !Conv2D::getTileWords(input, weights, stride, dilation, properties.limits.maxComputeSharedMemorySize,
-                                  tileInputWords, tileWeightWords)) {
+        constexpr uint64_t maxTileGroups = 4;
+        const uint64_t channelGroups = (static_cast<uint64_t>(outputDimensions[3]) + 3) / 4;
+        bool fits = false;
+        for (tileGroups = static_cast<uint32_t>(channelGroups < maxTileGroups ? channelGroups : maxTileGroups);
+             tileGroups >= 1; tileGroups /= 2) {
+            const uint64_t workgroupsZ =
+                static_cast<uint64_t>(outputDimensions[0]) * ((channelGroups + tileGroups - 1) / tileGroups);
+            if (64u * tileGroups <= properties.limits.maxComputeWorkGroupInvocations &&
+                tileGroups <= properties.limits.maxComputeWorkGroupSize[2] &&
+                workgroupsZ <= properties.limits.maxComputeWorkGroupCount[2] &&
+                Conv2D::getTileWords(input, weights, stride, dilation, tileGroups,
+                                     properties.limits.maxComputeSharedMemorySize, tileInputWords, tileWeightWords)) {
+                fits = true;
+                break;
+            }
+        }
+        if (!fits) {
             tileInputWords = 0;
             tileWeightWords = 0;
+            tileGroups = 1;
         }
     }
     makePipeline<Conv2D>(input, output, weights, biases, pad, stride, dilation, inputZeroPoint, weightZeroPoint,
                          accType, debugName, tail,
-                         tileInputWords, tileWeightWords);
+                         tileInputWords, tileWeightWords, tileGroups);
 }
 
 void GraphPipeline::makeConv3D(const std::shared_ptr<TensorDescriptor> &input,

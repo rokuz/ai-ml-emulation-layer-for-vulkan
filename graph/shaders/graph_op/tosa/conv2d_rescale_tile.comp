@@ -23,7 +23,7 @@ DEFINE_CONV_ACC_CASTS(ACC_T, OUT_T, TYPE_IN, TYPE_OUT)
     #define VEC4 vec4
 #endif
 
-layout(local_size_x = %warpX%, local_size_y = %warpY%, local_size_z = %warpZ%) in;
+layout(local_size_x = %warpX%, local_size_y = %warpY%, local_size_z_id = 7) in;
 
 layout(push_constant) uniform PushConstants {
     int32_t inputZeroPoint;
@@ -103,9 +103,12 @@ int tileDot(ivec4 a, ivec4 b) {
 
 void main() {
     const uint outputChannels = tensorSizeARM(outputData, 3);
+    const uint tileGroups = gl_WorkGroupSize.z;
     const uint channelGroups = (outputChannels + 3u) / 4u;
-    const uint n = gl_GlobalInvocationID.z / channelGroups;
-    const uint oc = (gl_GlobalInvocationID.z - n * channelGroups) * 4u;
+    const uint batchGroups = (channelGroups + tileGroups - 1u) / tileGroups * tileGroups;
+    const uint n = gl_GlobalInvocationID.z / batchGroups;
+    const uint oc = (gl_GlobalInvocationID.z - n * batchGroups) * 4u;
+    const uint tileChannel = (gl_WorkGroupID.z * tileGroups - n * batchGroups) * 4u;
     const uint ox = gl_GlobalInvocationID.x;
     const uint oy = gl_GlobalInvocationID.y;
 
@@ -157,16 +160,16 @@ void main() {
     }
 
     const uint weightPaddingWord = packTileWord(weightZeroPoint, weightZeroPoint, weightZeroPoint, weightZeroPoint);
-    for (uint cell = gl_LocalInvocationIndex; cell < 4u * kernelCells; cell += threads) {
+    for (uint cell = gl_LocalInvocationIndex; cell < 4u * tileGroups * kernelCells; cell += threads) {
         const uint k = cell / kernelCells;
         const uint position = cell - k * kernelCells;
         const uint ky = position / kernelWidth;
         const uint kx = position - ky * kernelWidth;
         const uint base = k * cellWords + position * words;
-        if (oc + k < outputChannels) {
+        if (tileChannel + k < outputChannels) {
             for (uint word = 0u; word < words; word++) {
                 WEIGHT_T weight[4];
-                tensorReadARM(weightsData, uint[](oc + k, ky, kx, word * 4u), weight);
+                tensorReadARM(weightsData, uint[](tileChannel + k, ky, kx, word * 4u), weight);
                 tileWeights[base + word] = packTileWord(int(weight[0]), int(weight[1]), int(weight[2]), int(weight[3]));
             }
         } else {
@@ -178,7 +181,7 @@ void main() {
 
     barrier();
 
-    if (oy >= tensorSizeARM(outputData, 1) || ox >= tensorSizeARM(outputData, 2)) {
+    if (oy >= tensorSizeARM(outputData, 1) || ox >= tensorSizeARM(outputData, 2) || oc >= outputChannels) {
         return;
     }
 
@@ -192,7 +195,7 @@ void main() {
             const uint weightBase = (ky * kernelWidth + kx) * words;
             for (uint word = 0u; word < words; word++) {
                 const ivec4 value = unpackTileWord(tileInput[inputBase + word]) - inputZeroPoint;
-                const uint weightWord = weightBase + word;
+                const uint weightWord = gl_LocalInvocationID.z * 4u * cellWords + weightBase + word;
                 acc += ivec4(tileDot(value, unpackTileWord(tileWeights[weightWord]) - weightZeroPoint),
                              tileDot(value, unpackTileWord(tileWeights[cellWords + weightWord]) - weightZeroPoint),
                              tileDot(value, unpackTileWord(tileWeights[2u * cellWords + weightWord]) - weightZeroPoint),
