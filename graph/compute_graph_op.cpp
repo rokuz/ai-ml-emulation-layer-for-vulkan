@@ -2084,6 +2084,21 @@ DescriptorMap Resize::createDescriptorMap(const std::shared_ptr<TensorDescriptor
     return descriptorMap;
 }
 
+void Resize::cmdDispatch(VkCommandBuffer commandBuffer) {
+    const auto &tensor = pipelineLayout->getTensorForSet(0);
+    const auto &dimensions = tensor->getDimensions();
+    const std::string_view typeId = getFormatInfo(tensor->getFormat())->typeId;
+    const bool scalarFloat = typeId == "0x6632" || typeId == "0x6634" || typeId == "0x6642";
+    uint32_t size = scalarFloat ? static_cast<uint32_t>(dimensions.back())
+                                : divideRoundUp(static_cast<uint32_t>(dimensions.back()), 4u);
+    for (size_t i = 0; i + 1 < dimensions.size(); i++) {
+        size *= static_cast<uint32_t>(dimensions[i]);
+    }
+
+    const auto groupCount = static_cast<uint32_t>(std::ceil(std::sqrt(double(divideRoundUp(size, warp1D)))));
+    loader->vkCmdDispatch(commandBuffer, groupCount, groupCount, 1);
+}
+
 SpirvBinary Resize::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCache,
                                 const std::shared_ptr<TensorDescriptor> &input,
                                 const std::shared_ptr<TensorDescriptor> &output) const {

@@ -51,8 +51,9 @@ int idivFloor(int numerator, int denominator) {
 }
 
 void main() {
+#if IS_FLOAT(TYPE_OUT) || IS_BFLOAT(TYPE_OUT)
     uint[4] index;
-    getDispatchIndex4(outputData, index);
+    getIndex4(outputData, index);
 
     COMP_T acc = COMP_T(0);
 
@@ -60,6 +61,83 @@ void main() {
     uint oy = index[1];
     uint ox = index[2];
     uint c = index[3];
+
+    uint[4] inputShape = {
+        tensorSizeARM(inputData, 0),
+        tensorSizeARM(inputData, 1),
+        tensorSizeARM(inputData, 2),
+        tensorSizeARM(inputData, 3)
+    };
+
+    COMP_T unit_y = COMP_T(1.0);
+    COMP_T unit_x = COMP_T(1.0);
+
+    int32_t y = int32_t(oy * pushConstants.scale.y.d + pushConstants.offset.y);
+    int16_t iy = int16_t(idivFloor(y, pushConstants.scale.y.n));
+    int16_t ry = int16_t(y - iy * pushConstants.scale.y.n);
+
+    int32_t x = int32_t(ox * pushConstants.scale.x.d + pushConstants.offset.x);
+    int16_t ix = int16_t(idivFloor(x, pushConstants.scale.x.n));
+    int16_t rx = int16_t(x - ix * pushConstants.scale.x.n);
+
+    COMP_T dy = COMP_T(ry) / COMP_T(pushConstants.scale.y.n);
+    COMP_T dx = COMP_T(rx) / COMP_T(pushConstants.scale.x.n);
+
+    int16_t iy0 = int16_t(max(iy, 0));
+    int16_t iy1 = int16_t(min(iy + 1, inputShape[1] - 1));
+    int16_t ix0 = int16_t(max(ix, 0));
+    int16_t ix1 = int16_t(min(ix + 1, inputShape[2] - 1));
+
+    if (pushConstants.mode == BILINEAR) {
+        IN_T v00;
+        tensorReadARM(inputData, uint[](n, iy0, ix0, c), v00);
+
+        IN_T v01;
+        tensorReadARM(inputData, uint[](n, iy0, ix1, c), v01);
+
+        IN_T v10;
+        tensorReadARM(inputData, uint[](n, iy1, ix0, c), v10);
+
+        IN_T v11;
+        tensorReadARM(inputData, uint[](n, iy1, ix1, c), v11);
+
+        acc  = DECODE_STORAGE_TO_COMP(v00, TYPE_IN, COMP_T) * COMP_T(unit_y - dy) * COMP_T(unit_x - dx);
+        acc += DECODE_STORAGE_TO_COMP(v01, TYPE_IN, COMP_T) * COMP_T(unit_y - dy) * COMP_T(dx);
+        acc += DECODE_STORAGE_TO_COMP(v10, TYPE_IN, COMP_T) * COMP_T(dy) * COMP_T(unit_x - dx);
+        acc += DECODE_STORAGE_TO_COMP(v11, TYPE_IN, COMP_T) * COMP_T(dy) * COMP_T(dx);
+    } else if (pushConstants.mode == NEAREST) {
+        int32_t iy = (dy >= 0.5) ? iy1 : iy0;
+        int32_t ix = (dx >= 0.5) ? ix1 : ix0;
+
+        IN_T value;
+        tensorReadARM(inputData, uint[](n, iy, ix, c), value);
+
+        acc = DECODE_STORAGE_TO_COMP(value, TYPE_IN, COMP_T);
+    }
+
+    OUT_T outputValue = ENCODE_COMP_TO_STORAGE(acc, OUT_T, TYPE_OUT);
+
+    tensorWriteARM(outputData, index, outputValue);
+#else
+    const uint outputBatches = DISPATCH_RANK == 4u ? DISPATCH_SHAPE_0 : tensorSizeARM(outputData, 0);
+    const uint outputHeight = DISPATCH_RANK == 4u ? DISPATCH_SHAPE_1 : tensorSizeARM(outputData, 1);
+    const uint outputWidth = DISPATCH_RANK == 4u ? DISPATCH_SHAPE_2 : tensorSizeARM(outputData, 2);
+    const uint outputChannels = DISPATCH_RANK == 4u ? DISPATCH_SHAPE_3 : tensorSizeARM(outputData, 3);
+    const uint channelGroups = (outputChannels + 3u) / 4u;
+
+    uint dispatchOffset = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+    const uint c = (dispatchOffset % channelGroups) * 4u;
+    dispatchOffset /= channelGroups;
+    const uint ox = dispatchOffset % outputWidth;
+    dispatchOffset /= outputWidth;
+    const uint oy = dispatchOffset % outputHeight;
+    dispatchOffset /= outputHeight;
+    const uint n = dispatchOffset;
+    if (n >= outputBatches) {
+        return;
+    }
+
+    COMP_T acc[4] = COMP_T[4](COMP_T(0), COMP_T(0), COMP_T(0), COMP_T(0));
 
     uint[4] inputShape = {
         tensorSizeARM(inputData, 0),
@@ -98,22 +176,24 @@ void main() {
     int16_t ix1 = int16_t(min(ix + 1, inputShape[2] - 1));
 
     if ((PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_8) : pushConstants.mode) == BILINEAR) {
-        IN_T v00;
+        IN_T v00[4];
         tensorReadARM(inputData, uint[](n, iy0, ix0, c), v00);
 
-        IN_T v01;
+        IN_T v01[4];
         tensorReadARM(inputData, uint[](n, iy0, ix1, c), v01);
 
-        IN_T v10;
+        IN_T v10[4];
         tensorReadARM(inputData, uint[](n, iy1, ix0, c), v10);
 
-        IN_T v11;
+        IN_T v11[4];
         tensorReadARM(inputData, uint[](n, iy1, ix1, c), v11);
 
-        acc  = DECODE_STORAGE_TO_COMP(v00, TYPE_IN, COMP_T) * COMP_T(unit_y - dy) * COMP_T(unit_x - dx);
-        acc += DECODE_STORAGE_TO_COMP(v01, TYPE_IN, COMP_T) * COMP_T(unit_y - dy) * COMP_T(dx);
-        acc += DECODE_STORAGE_TO_COMP(v10, TYPE_IN, COMP_T) * COMP_T(dy) * COMP_T(unit_x - dx);
-        acc += DECODE_STORAGE_TO_COMP(v11, TYPE_IN, COMP_T) * COMP_T(dy) * COMP_T(dx);
+        for (uint k = 0; k < 4; k++) {
+            acc[k]  = DECODE_STORAGE_TO_COMP(v00[k], TYPE_IN, COMP_T) * COMP_T(unit_y - dy) * COMP_T(unit_x - dx);
+            acc[k] += DECODE_STORAGE_TO_COMP(v01[k], TYPE_IN, COMP_T) * COMP_T(unit_y - dy) * COMP_T(dx);
+            acc[k] += DECODE_STORAGE_TO_COMP(v10[k], TYPE_IN, COMP_T) * COMP_T(dy) * COMP_T(unit_x - dx);
+            acc[k] += DECODE_STORAGE_TO_COMP(v11[k], TYPE_IN, COMP_T) * COMP_T(dy) * COMP_T(dx);
+        }
     } else if ((PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_8) : pushConstants.mode) == NEAREST) {
 #if IS_FLOAT(TYPE_OUT) || IS_BFLOAT(TYPE_OUT)
         int32_t iy = (dy >= 0.5) ? iy1 : iy0;
@@ -123,13 +203,19 @@ void main() {
         int32_t ix = (2 * dx >= (PUSH_WORDS_VALID != 0 ? PUSH_WORD_2 : pushConstants.scale.x.n)) ? ix1 : ix0;
 #endif
 
-        IN_T value;
+        IN_T value[4];
         tensorReadARM(inputData, uint[](n, iy, ix, c), value);
 
-        acc = DECODE_STORAGE_TO_COMP(value, TYPE_IN, COMP_T);
+        for (uint k = 0; k < 4; k++) {
+            acc[k] = DECODE_STORAGE_TO_COMP(value[k], TYPE_IN, COMP_T);
+        }
     }
 
-    OUT_T outputValue = ENCODE_COMP_TO_STORAGE(acc, OUT_T, TYPE_OUT);
+    OUT_T outputValue[4];
+    for (uint k = 0; k < 4; k++) {
+        outputValue[k] = ENCODE_COMP_TO_STORAGE(acc[k], OUT_T, TYPE_OUT);
+    }
 
     tensorWriteARM(outputData, uint[](n, oy, ox, c), outputValue);
+#endif
 }
