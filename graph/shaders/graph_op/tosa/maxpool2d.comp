@@ -21,14 +21,31 @@ layout(set = 0, binding = 0) uniform tensorARM<STORAGE_T, 4> outputData;
 layout(set = 1, binding = 0) uniform tensorARM<STORAGE_T, 4> inputData;
 
 void main() {
-    uint[4] index;
-    getDispatchIndex4(outputData, index);
+    const uint outputBatches = DISPATCH_RANK == 4u ? DISPATCH_SHAPE_0 : tensorSizeARM(outputData, 0);
+    const uint outputHeight = DISPATCH_RANK == 4u ? DISPATCH_SHAPE_1 : tensorSizeARM(outputData, 1);
+    const uint outputWidth = DISPATCH_RANK == 4u ? DISPATCH_SHAPE_2 : tensorSizeARM(outputData, 2);
+    const uint outputChannels = DISPATCH_RANK == 4u ? DISPATCH_SHAPE_3 : tensorSizeARM(outputData, 3);
+    const uint channelGroups = (outputChannels + 3u) / 4u;
 
-    IN_OUT_T acc = IN_OUT_T(%in_out_t_lowest%);
-    uint on = index[0];
-    uint oy = index[1];
-    uint ox = index[2];
-    uint oc = index[3];
+    uint dispatchOffset = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+    const uint oc = (dispatchOffset % channelGroups) * 4u;
+    dispatchOffset /= channelGroups;
+    const uint ox = dispatchOffset % outputWidth;
+    dispatchOffset /= outputWidth;
+    const uint oy = dispatchOffset % outputHeight;
+    dispatchOffset /= outputHeight;
+    const uint on = dispatchOffset;
+    if (on >= outputBatches) {
+        return;
+    }
+    uint[4] index = uint[](on, oy, ox, oc);
+
+    IN_OUT_T acc[4] = IN_OUT_T[4](IN_OUT_T(%in_out_t_lowest%), IN_OUT_T(%in_out_t_lowest%),
+                                  IN_OUT_T(%in_out_t_lowest%), IN_OUT_T(%in_out_t_lowest%));
+#if IS_FLOAT(TYPE_IN_OUT) || IS_REDUCED_FLOAT(TYPE_IN_OUT)
+    bool nanSeen[4] = bool[4](false, false, false, false);
+    IN_OUT_T nanValue[4];
+#endif
 
     // Keep math in signed domain for signed push constants and cast only after bounds checks.
     int kernelY = max((PUSH_WORDS_VALID != 0 ? int[2](PUSH_WORD_0, PUSH_WORD_1)[0] : pushConstants.kernel[0]), 0);
@@ -45,28 +62,40 @@ void main() {
             int x = ix + kx;
 
             if (y >= 0 && x >= 0 && uint(y) < tensorSizeARM(inputData, 1) && uint(x) < tensorSizeARM(inputData, 2)) {
-                STORAGE_T valueRaw;
+                STORAGE_T valueRaw[4];
                 tensorReadARM(inputData, uint[](on, uint(y), uint(x), oc), valueRaw);
 
-                IN_OUT_T value = DECODE_STORAGE_TO_COMP(valueRaw, TYPE_IN_OUT, IN_OUT_T);
+                for (uint k = 0; k < 4; k++) {
+                    IN_OUT_T value = DECODE_STORAGE_TO_COMP(valueRaw[k], TYPE_IN_OUT, IN_OUT_T);
 
 #if IS_FLOAT(TYPE_IN_OUT) || IS_REDUCED_FLOAT(TYPE_IN_OUT)
-                if (isnan(value)) {
-                    if ((PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_8) : pushConstants.nanMode) == NAN_MODE_IGNORE) {
-                        // Ignore value and continue
+                    if (isnan(value)) {
+                        if ((PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_8) : pushConstants.nanMode) == NAN_MODE_IGNORE) {
+                            // Ignore value and continue
+                            continue;
+                        }
+                        // If any value is NaN, then the result must be NaN
+                        if (!nanSeen[k]) {
+                            nanSeen[k] = true;
+                            nanValue[k] = value;
+                        }
                         continue;
                     }
-                    else {
-                        // If any value is NaN, then the result must be NaN
-                        tensorWriteARM(outputData, index, ENCODE_COMP_TO_STORAGE(value, STORAGE_T, TYPE_IN_OUT));
-                        return;
-                    }
-                }
 #endif
-                acc = max(acc, value);
+                    acc[k] = max(acc[k], value);
+                }
             }
         }
     }
 
-    tensorWriteARM(outputData, index, ENCODE_COMP_TO_STORAGE(acc, STORAGE_T, TYPE_IN_OUT));
+    STORAGE_T outValue[4];
+    for (uint k = 0; k < 4; k++) {
+#if IS_FLOAT(TYPE_IN_OUT) || IS_REDUCED_FLOAT(TYPE_IN_OUT)
+        outValue[k] = ENCODE_COMP_TO_STORAGE(nanSeen[k] ? nanValue[k] : acc[k], STORAGE_T, TYPE_IN_OUT);
+#else
+        outValue[k] = ENCODE_COMP_TO_STORAGE(acc[k], STORAGE_T, TYPE_IN_OUT);
+#endif
+    }
+
+    tensorWriteARM(outputData, index, outValue);
 }

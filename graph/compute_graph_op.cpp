@@ -811,6 +811,20 @@ SpirvBinary AvgPool2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipeli
                                   });
 }
 
+void AvgPool2D::cmdDispatch(VkCommandBuffer commandBuffer) {
+    const auto &tensor = pipelineLayout->getTensorForSet(0);
+    const auto &dimensions = tensor->getDimensions();
+    uint32_t size = divideRoundUp(static_cast<uint32_t>(dimensions.back()), 4u);
+    for (size_t i = 0; i + 1 < dimensions.size(); i++) {
+        size *= static_cast<uint32_t>(dimensions[i]);
+    }
+
+    const auto groupCountX = static_cast<uint32_t>(std::ceil(std::sqrt(double(divideRoundUp(size, warp1D)))));
+    const auto groupCountY = groupCountX;
+
+    loader->vkCmdDispatch(commandBuffer, groupCountX, groupCountY, 1);
+}
+
 /*******************************************************************************
  * Cast
  *******************************************************************************/
@@ -1793,6 +1807,20 @@ SpirvBinary MaxPool2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipeli
                                       {"%in_out_t_type%", inOutType->typeId},
                                       {"%in_out_t_comp%", inOutType->compType},
                                   });
+}
+
+void MaxPool2D::cmdDispatch(VkCommandBuffer commandBuffer) {
+    const auto &tensor = pipelineLayout->getTensorForSet(0);
+    const auto &dimensions = tensor->getDimensions();
+    uint32_t size = divideRoundUp(static_cast<uint32_t>(dimensions.back()), 4u);
+    for (size_t i = 0; i + 1 < dimensions.size(); i++) {
+        size *= static_cast<uint32_t>(dimensions[i]);
+    }
+
+    const auto groupCountX = static_cast<uint32_t>(std::ceil(std::sqrt(double(divideRoundUp(size, warp1D)))));
+    const auto groupCountY = groupCountX;
+
+    loader->vkCmdDispatch(commandBuffer, groupCountX, groupCountY, 1);
 }
 
 /*******************************************************************************

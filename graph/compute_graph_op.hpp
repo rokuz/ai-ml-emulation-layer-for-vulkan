@@ -334,6 +334,8 @@ class AvgPool2D : public ComputePipeline {
     SpirvBinary createSpirv(const std::shared_ptr<PipelineCache> &pipelineCache,
                             const std::shared_ptr<TensorDescriptor> &output, uint32_t accType) const;
 
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     PushConstant pushConstant;
 
     static constexpr std::string_view shaderName = "avgpool2d";
@@ -749,6 +751,8 @@ class MaxPool2D : public ComputePipeline {
 
     SpirvBinary createSpirv(const std::shared_ptr<PipelineCache> &pipelineCache,
                             const std::shared_ptr<TensorDescriptor> &output, uint32_t _nanMode) const;
+
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
 
     PushConstant pushConstant;
 
