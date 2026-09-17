@@ -72,6 +72,9 @@ TensorARM::TensorInfo::TensorInfo(const VkTensorCreateInfoARM &createInfo) {
         strides = std::vector<int64_t>{desc.pStrides, desc.pStrides + dimensionCount};
     }
     size = static_cast<size_t>(dimensions[0] * strides[0]);
+    if (size > 0xFFFFFFFFull) {
+        throw std::runtime_error(std::string("Tensor size not supported: ") + std::to_string(size));
+    }
 }
 
 VkResult TensorARM::create(const Device &dev, const VkTensorCreateInfoARM &createInfo,
