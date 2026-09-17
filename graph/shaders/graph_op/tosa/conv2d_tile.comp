@@ -11,7 +11,6 @@
 #define TYPE_ACC %acc_t_type%
 #define ACC_T %acc_t%
 
-DEFINE_CONV_ACC_CASTS(ACC_T, OUT_T, TYPE_IN, TYPE_OUT)
 
 #if TYPE_ACC == TYPE_INT64
     #define VEC4 i64vec4
@@ -160,13 +159,13 @@ void main() {
     if (tensorSizeARM(biasesData, 0) == 1) {
         OUT_T bias;
         tensorReadARM(biasesData, uint[](0), bias);
-        acc += ivec4(to_acc(bias));
+        acc += ivec4(CONV_TO_ACC_BIAS(bias));
     } else {
         OUT_T bias[4];
         tensorReadARM(biasesData, uint[](oc), bias);
-        acc += ivec4(to_acc(bias[0]), to_acc(bias[1]), to_acc(bias[2]), to_acc(bias[3]));
+        acc += ivec4(CONV_TO_ACC_BIAS(bias[0]), CONV_TO_ACC_BIAS(bias[1]), CONV_TO_ACC_BIAS(bias[2]), CONV_TO_ACC_BIAS(bias[3]));
     }
     uint index[] = {n, oy, ox, oc};
-    OUT_T outData[4] = OUT_T[](acc_to_out(acc[0], OUT_T(0)), acc_to_out(acc[1], OUT_T(0)), acc_to_out(acc[2], OUT_T(0)), acc_to_out(acc[3], OUT_T(0)));
+    OUT_T outData[4] = OUT_T[](CONV_ACC_TO_OUT(acc[0]), CONV_ACC_TO_OUT(acc[1]), CONV_ACC_TO_OUT(acc[2]), CONV_ACC_TO_OUT(acc[3]));
     tensorWriteARM(outputData, index, outData);
 }

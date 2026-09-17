@@ -907,12 +907,14 @@ class VulkanLayer {
         VkPhysicalDeviceVulkan13Features layerVulkan13Feature{};
         VkPhysicalDeviceSynchronization2Features layerSynchronization2Feature{};
         VkPhysicalDeviceMaintenance4Features layerMaintenance4Feature{};
+        VkPhysicalDeviceShaderIntegerDotProductFeatures layerShaderIntegerDotProductFeature{};
         if (pDeviceFeature13) {
             layerVulkan13Feature.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
             layerVulkan13Feature = *pDeviceFeature13;
             layerVulkan13Feature.pNext = nullptr;
             layerVulkan13Feature.synchronization2 = queryVulkan13Feature.synchronization2;
             layerVulkan13Feature.maintenance4 = queryVulkan13Feature.maintenance4;
+            layerVulkan13Feature.shaderIntegerDotProduct = queryVulkan13Feature.shaderIntegerDotProduct;
             appendType(&newCreateInfo, &layerVulkan13Feature);
         } else {
             replaceOrAppendFeature(&newCreateInfo, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES,
@@ -923,6 +925,12 @@ class VulkanLayer {
             replaceOrAppendFeature(&newCreateInfo, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES,
                                    layerMaintenance4Feature, [&](VkPhysicalDeviceMaintenance4Features &feature) {
                                        feature.maintenance4 = queryVulkan13Feature.maintenance4;
+                                   });
+            replaceOrAppendFeature(&newCreateInfo,
+                                   VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES,
+                                   layerShaderIntegerDotProductFeature,
+                                   [&](VkPhysicalDeviceShaderIntegerDotProductFeatures &feature) {
+                                       feature.shaderIntegerDotProduct = queryVulkan13Feature.shaderIntegerDotProduct;
                                    });
         }
 

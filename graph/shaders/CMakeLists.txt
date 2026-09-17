@@ -335,6 +335,38 @@ foreach(TAIL_OUT_T int8_t int16_t int)
     endforeach()
 endforeach()
 
+# The tiled CONV2D kernels convolving with the integer dot product
+set(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_tile_dot_int8_t_int8_t_int_int.spv")
+mlel_generate_glsl(
+    INPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_tile_dot.comp"
+    OUTPUT ${OUTPUT}
+    REPLACE "warpX=${WARPX}"
+    REPLACE "warpY=${WARPY}"
+    REPLACE "warpZ=${WARPZ}"
+    REPLACE "in_t=int8_t"
+    REPLACE "weight_t=int8_t"
+    REPLACE "out_t=int"
+    REPLACE "acc_t=int")
+list(APPEND SPV_FILES ${OUTPUT})
+foreach(TAIL_OUT_T int8_t int16_t int)
+    foreach(TAIL_MUL_T int16_t int)
+        set(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_rescale_tile_dot_int8_t_int8_t_int_int_${TAIL_OUT_T}_${TAIL_MUL_T}.spv")
+        mlel_generate_glsl(
+            INPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_rescale_tile_dot.comp"
+            OUTPUT ${OUTPUT}
+            REPLACE "warpX=${WARPX}"
+            REPLACE "warpY=${WARPY}"
+            REPLACE "warpZ=${WARPZ}"
+            REPLACE "in_t=int8_t"
+            REPLACE "weight_t=int8_t"
+            REPLACE "out_t=int"
+            REPLACE "acc_t=int"
+            REPLACE "tail_out_t=${TAIL_OUT_T}"
+            REPLACE "tail_mul_t=${TAIL_MUL_T}")
+        list(APPEND SPV_FILES ${OUTPUT})
+    endforeach()
+endforeach()
+
 # Elementwise
 macro(mlel_spv_elementwise PIPELINE NAME OPERATION)
     foreach(IN_OUT_T ${ARGN})

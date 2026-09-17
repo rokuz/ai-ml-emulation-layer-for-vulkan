@@ -9,10 +9,11 @@
 #define TAIL_MUL_T %tail_mul_t%
 #define WEIGHT_T %weight_t%
 #define TYPE_IN %in_t_type%
+#define TYPE_WEIGHT %weight_t_type%
 #define TYPE_OUT %out_t_type%
+#define TYPE_ACC %acc_t_type%
 #define ACC_T %acc_t%
 
-DEFINE_CONV_ACC_CASTS(ACC_T, OUT_T, TYPE_IN, TYPE_OUT)
 
 layout(local_size_x = %warpX%) in;
 
@@ -84,7 +85,7 @@ void main() {
 
     OUT_T tempAcc;
     tensorReadARM(biasesData, uint[](tensorSizeARM(biasesData, 0) == 1 ? 0 : oc), tempAcc);
-    ACC_T acc = to_acc(tempAcc);
+    ACC_T acc = CONV_TO_ACC_BIAS(tempAcc);
 
     for (uint ky = 0; ky < tensorSizeARM(weightsData, 1); ky++) {
         for (uint kx = 0; kx < tensorSizeARM(weightsData, 2); kx++) {
@@ -105,8 +106,8 @@ void main() {
                         tensorReadARM(inputData, uint[](n, uint(iy), uint(ix), ic), inV);
                         tensorReadARM(weightsData, uint[](oc, ky, kx, ic), wV);
 
-                        ACC_T inAcc = to_acc(inV) - ACC_T((PUSH_WORDS_VALID != 0 ? PUSH_WORD_0 : pushConstants.inputZeroPoint));
-                        ACC_T wAcc = to_acc(wV) - ACC_T((PUSH_WORDS_VALID != 0 ? PUSH_WORD_1 : pushConstants.weightZeroPoint));
+                        ACC_T inAcc = CONV_TO_ACC_INPUT(inV) - ACC_T((PUSH_WORDS_VALID != 0 ? PUSH_WORD_0 : pushConstants.inputZeroPoint));
+                        ACC_T wAcc = CONV_TO_ACC_WEIGHT(wV) - ACC_T((PUSH_WORDS_VALID != 0 ? PUSH_WORD_1 : pushConstants.weightZeroPoint));
                         acc += inAcc * wAcc;
                     }
                 }
@@ -115,6 +116,6 @@ void main() {
     }
 
     TAIL_OUT_T tailValue;
-    rescaleTail(OUT_T(acc_to_out(acc, OUT_T(0))), oc, tailValue)
+    rescaleTail(OUT_T(CONV_ACC_TO_OUT(acc)), oc, tailValue)
     tensorWriteARM(outputData, index, tailValue);
 }
