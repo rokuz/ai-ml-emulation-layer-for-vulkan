@@ -187,7 +187,7 @@ float sin_hybrid(float x) {
 
 void main() {
     uint[RANK] index;
-    getIndex(outputData, index);
+    getDispatchIndex(outputData, index);
 
     IN_OUT_T inValueStorage;
     tensorReadARM(inputData1, index, inValueStorage);

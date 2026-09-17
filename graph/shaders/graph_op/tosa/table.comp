@@ -38,7 +38,7 @@ int32_t lookup(int16_t value) {
 
 void main() {
     uint[RANK] index;
-    getIndex(outputData, index);
+    getDispatchIndex(outputData, index);
 
     IN_T value;
     tensorReadARM(inputData, index, value);

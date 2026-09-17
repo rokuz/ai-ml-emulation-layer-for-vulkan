@@ -126,6 +126,7 @@ class ComputePipelineLayout {
     VkPipelineLayout getVkPipelineLayout() const;
     const DescriptorMap &getDescriptorMap() const;
     const std::shared_ptr<TensorDescriptor> &getTensorForSet(uint32_t set) const;
+    const PushConstant &getPushConstant() const;
 
     void makeDescriptorSets(ComputeDescriptorSetMap &mapping, const TensorDescriptorMap &filter) const;
     void cmdBindAndDispatch(VkCommandBuffer commandBuffer, const ComputeDescriptorSetMap &descriptorSetMap);
@@ -162,6 +163,7 @@ class ComputePipelineBase {
     virtual ~ComputePipelineBase();
 
     virtual void cmdBindAndDispatch(VkCommandBuffer commandBuffer, const ComputeDescriptorSetMap &descriptorSetMap);
+    virtual void finalize() {}
 
     const std::shared_ptr<ComputePipelineLayout> &getComputePipelineLayout() const;
 
@@ -194,11 +196,13 @@ class ComputePipeline : public ComputePipelineBase {
     explicit ComputePipeline(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> &_loader,
                              VkDevice _device, DescriptorMap descriptorMap, const PushConstant &pushConstant,
                              const std::shared_ptr<PipelineCache> &_pipelineCache, const SpirvBinary &_spirv,
-                             const std::string &debugName, const SpecConstants &_constants = {});
+                             const std::string &debugName, const SpecConstants &_constants = {},
+                             uint32_t _dispatchSet = 0);
 
     ~ComputePipeline() override;
 
     void cmdBindAndDispatch(VkCommandBuffer commandBuffer, const ComputeDescriptorSetMap &descriptorSetMap) override;
+    void finalize() override;
 
   protected:
     VkShaderModule createShaderModule(const SpirvBinary &code) const;
@@ -209,9 +213,11 @@ class ComputePipeline : public ComputePipelineBase {
     std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> loader;
     VkDevice device;
     std::shared_ptr<PipelineCache> pipelineCache;
+    uint32_t dispatchSet = 0;
 
     VkShaderModule shaderModule;
     VkPipeline pipeline;
+    SpecConstants constants;
 
     static const uint32_t warp1D = 64;
     static constexpr std::string_view warp1DSv = "64";
@@ -1506,6 +1512,7 @@ class GraphPipeline {
   private:
     template <typename PipelineT, typename... Args> void makePipeline(Args &&...args) {
         auto pipeline = std::make_shared<PipelineT>(loader, device, pipelineCache, std::forward<Args>(args)...);
+        pipeline->finalize();
         pipelines.emplace_back(std::move(pipeline));
     }
 

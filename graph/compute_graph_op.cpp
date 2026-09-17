@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <numeric>
 #include <string_view>
 
@@ -201,6 +202,8 @@ ComputePipelineLayout::~ComputePipelineLayout() {
 VkPipelineLayout ComputePipelineLayout::getVkPipelineLayout() const { return pipelineLayout; }
 
 const DescriptorMap &ComputePipelineLayout::getDescriptorMap() const { return descriptorMap; }
+
+const PushConstant &ComputePipelineLayout::getPushConstant() const { return pushConstant; }
 
 const std::shared_ptr<TensorDescriptor> &ComputePipelineLayout::getTensorForSet(const uint32_t set) const {
     for (const auto &descriptor : descriptorMap) {
@@ -526,13 +529,21 @@ createPipelineLayout(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::Dispatc
 ComputePipeline::ComputePipeline(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> &_loader,
                                  VkDevice _device, DescriptorMap descriptorMap, const PushConstant &pushConstant,
                                  const std::shared_ptr<PipelineCache> &_pipelineCache, const SpirvBinary &_spirv,
-                                 const std::string &debugName, const SpecConstants &_constants)
+                                 const std::string &debugName, const SpecConstants &_constants,
+                                 const uint32_t _dispatchSet)
     : ComputePipelineBase(createPipelineLayout(_loader, _device, std::move(descriptorMap), pushConstant), debugName),
-      loader{_loader}, device{_device}, pipelineCache{_pipelineCache},
+      loader{_loader}, device{_device}, pipelineCache{_pipelineCache}, dispatchSet{_dispatchSet},
       // Vulkan objects created from the provided SPIR-V.
-      shaderModule{createShaderModule(_spirv)}, pipeline{createComputePipeline(_constants)} {
+      shaderModule{createShaderModule(_spirv)}, pipeline{VK_NULL_HANDLE}, constants{_constants} {
     assert(std::to_string(warp1D) == warp1DSv);
     connectPipelines();
+}
+
+void ComputePipeline::finalize() {
+    if (pipeline != VK_NULL_HANDLE) {
+        return;
+    }
+    pipeline = createComputePipeline(constants);
     setDebugUtilsObjectName(loader, device, VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<uint64_t>(pipeline), debugName);
 }
 
@@ -543,6 +554,7 @@ ComputePipeline::~ComputePipeline() {
 
 void ComputePipeline::cmdBindAndDispatch(VkCommandBuffer commandBuffer,
                                          const ComputeDescriptorSetMap &descriptorSetMap) {
+    finalize();
     loader->vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
     pipelineLayout->cmdBindAndDispatch(commandBuffer, descriptorSetMap);
     cmdDispatch(commandBuffer);
@@ -560,8 +572,47 @@ void ComputePipeline::cmdDispatch(VkCommandBuffer commandBuffer) {
 }
 
 VkPipeline ComputePipeline::createComputePipeline(const SpecConstants &_constants) const {
-    const auto specializationConstants = common::makeSpecializationConstantsView(_constants);
-    const auto *specialization = _constants.empty() ? nullptr : &specializationConstants;
+    constexpr uint32_t dispatchRankId = 100;
+    constexpr uint32_t maxDispatchRank = 6;
+    std::vector<uint32_t> values = _constants;
+    std::vector<uint32_t> ids(_constants.size());
+    for (size_t i = 0; i < ids.size(); i++) {
+        ids[i] = static_cast<uint32_t>(i);
+    }
+    const auto &tensor = pipelineLayout->getTensorForSet(dispatchSet);
+    if (tensor != nullptr && tensor->getRank() <= maxDispatchRank) {
+        const auto &dimensions = tensor->getDimensions();
+        values.push_back(static_cast<uint32_t>(tensor->getRank()));
+        ids.push_back(dispatchRankId);
+        for (uint32_t i = 0; i < maxDispatchRank; i++) {
+            values.push_back(i < dimensions.size() ? static_cast<uint32_t>(dimensions[i]) : 1);
+            ids.push_back(dispatchRankId + 1 + i);
+        }
+    }
+
+    constexpr uint32_t pushWordsValidId = 199;
+    constexpr uint32_t pushWordBaseId = 200;
+    constexpr uint32_t maxPushWords = 16;
+    const auto &push = pipelineLayout->getPushConstant();
+    if (push.pointer != nullptr && push.size >= sizeof(uint32_t)) {
+        values.push_back(1);
+        ids.push_back(pushWordsValidId);
+        const uint32_t words = std::min(push.size / static_cast<uint32_t>(sizeof(uint32_t)), maxPushWords);
+        for (uint32_t i = 0; i < words; i++) {
+            uint32_t word = 0;
+            std::memcpy(&word, static_cast<const char *>(push.pointer) + i * sizeof(uint32_t), sizeof(word));
+            values.push_back(word);
+            ids.push_back(pushWordBaseId + i);
+        }
+    }
+
+    const common::SpecializationConstantsView specializationConstants = {
+        values.data(),
+        static_cast<uint32_t>(values.size() * sizeof(uint32_t)),
+        static_cast<uint32_t>(values.size()),
+        ids.data(),
+    };
+    const auto *specialization = values.empty() ? nullptr : &specializationConstants;
 
     return common::createComputePipeline(loader, device, pipelineCache->getPipelineCache(), shaderModule,
                                          pipelineLayout->getVkPipelineLayout(), specialization);
@@ -861,7 +912,7 @@ Concat::Concat(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoade
                const std::shared_ptr<TensorDescriptor> &_output, const uint32_t _axis, const uint32_t _offset,
                const std::string &debugName)
     : ComputePipeline(_loader, _device, createDescriptorMap(_input, _output), {&pushConstant, sizeof(pushConstant)},
-                      _pipelineCache, createSpirv(_pipelineCache, _output), debugName, {_input->getRank()}),
+                      _pipelineCache, createSpirv(_pipelineCache, _output), debugName, {_input->getRank()}, 1),
       pushConstant{createPushConstant(_axis, _offset)} {}
 
 Concat::PushConstant Concat::createPushConstant(const uint32_t axis, const uint32_t offset) const {

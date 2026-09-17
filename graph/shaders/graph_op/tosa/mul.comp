@@ -23,7 +23,7 @@ layout(set = 2, binding = 0) uniform tensorARM<IN_T, RANK_IN> inputData2;
 
 void main() {
     uint[RANK_OUT] index;
-    getIndex(outputData, index);
+    getDispatchIndex(outputData, index);
 
     uint[RANK_IN] inputShape1;
     uint[RANK_IN] inputIndex1;
@@ -50,8 +50,8 @@ void main() {
 #else
     int64_t result = int64_t(value1) * int64_t(value2);
 
-    if (pushConstants.shift > 0) {
-        result = (result + (int64_t(1) << (pushConstants.shift - 1))) >> pushConstants.shift;
+    if ((PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_0) : pushConstants.shift) > 0) {
+        result = (result + (int64_t(1) << ((PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_0) : pushConstants.shift) - 1))) >> (PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_0) : pushConstants.shift);
     }
 #endif
 

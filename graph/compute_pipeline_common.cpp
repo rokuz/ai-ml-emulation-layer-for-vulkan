@@ -15,13 +15,14 @@
 
 namespace mlsdk::el::compute::common {
 
-std::vector<VkSpecializationMapEntry> makeSpecializationMapEntries(const uint32_t entryCount) {
+std::vector<VkSpecializationMapEntry> makeSpecializationMapEntries(const uint32_t entryCount,
+                                                                   const uint32_t *constantIds) {
     std::vector<VkSpecializationMapEntry> entries;
     entries.reserve(entryCount);
 
     for (uint32_t i = 0; i < entryCount; ++i) {
         entries.push_back({
-            i,                                           // constantID
+            constantIds ? constantIds[i] : i,            // constantID
             static_cast<uint32_t>(i * sizeof(uint32_t)), // offset
             sizeof(uint32_t),                            // size
         });
@@ -96,7 +97,8 @@ VkPipeline createComputePipeline(const std::shared_ptr<VULKAN_HPP_NAMESPACE::det
                                                            nullptr, allocator);
     }
 
-    const auto specEntries = makeSpecializationMapEntries(specializationConstants->entryCount);
+    const auto specEntries =
+        makeSpecializationMapEntries(specializationConstants->entryCount, specializationConstants->constantIds);
     const VkSpecializationInfo specializationInfo = {
         static_cast<uint32_t>(specEntries.size()), // mapEntryCount
         specEntries.data(),                        // pMapEntries

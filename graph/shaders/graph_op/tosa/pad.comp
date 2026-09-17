@@ -21,7 +21,7 @@ layout(set = 2, binding = 0) uniform tensorARM<int32_t, 1> paddingData;
 
 void main() {
     uint[RANK] index;
-    getIndex(outputData, index);
+    getDispatchIndex(outputData, index);
 
     uint[RANK] inputShape;
     getShape(inputShape, inputData);
