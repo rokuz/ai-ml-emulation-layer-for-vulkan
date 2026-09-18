@@ -584,6 +584,8 @@ class DepthwiseConv2D : public ComputePipeline {
                             const std::shared_ptr<TensorDescriptor> &weights, uint32_t accType,
                             const RescaleTail *tail) const;
 
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     PushConstant pushConstant;
 
     static constexpr std::string_view shaderName = "depthwise_conv2d";
