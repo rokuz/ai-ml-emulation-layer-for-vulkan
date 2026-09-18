@@ -321,6 +321,31 @@ layout(constant_id = 106) const uint DISPATCH_SHAPE_5 = 1;
         }                                                                                                              \
     }
 
+#define getVectorIndex(index, shape)                                                                                   \
+    {                                                                                                                  \
+        if (DISPATCH_RANK == uint(shape.length())) {                                                                   \
+            const uint dispatchShape[6] = uint[](DISPATCH_SHAPE_0, DISPATCH_SHAPE_1, DISPATCH_SHAPE_2,                 \
+                                                 DISPATCH_SHAPE_3, DISPATCH_SHAPE_4, DISPATCH_SHAPE_5);                \
+            for (uint vectorDim = 0; vectorDim < shape.length(); vectorDim++) {                                        \
+                shape[vectorDim] = dispatchShape[vectorDim];                                                           \
+            }                                                                                                          \
+        }                                                                                                              \
+                                                                                                                       \
+        const uint vectorGroups = (shape[shape.length() - 1] + 3u) / 4u;                                               \
+        uint vectorOffset =                                                                                            \
+            gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x;               \
+        index[index.length() - 1] = (vectorOffset % vectorGroups) * 4u;                                                \
+        vectorOffset /= vectorGroups;                                                                                  \
+        for (int vectorDim = int(index.length()) - 2; vectorDim >= 0; vectorDim--) {                                   \
+            index[vectorDim] = vectorOffset % shape[vectorDim];                                                        \
+            vectorOffset /= shape[vectorDim];                                                                          \
+        }                                                                                                              \
+                                                                                                                       \
+        if (vectorOffset > 0) {                                                                                        \
+            return;                                                                                                    \
+        }                                                                                                              \
+    }
+
 // BF16 <-> FP32 conversions (bf16 stored as the top 16 bits of IEEE754 fp32)
 float decode_to_f32(bfloat16_t x)
 {

@@ -233,6 +233,7 @@ class ComputePipeline : public ComputePipelineBase {
     VkPipeline createComputePipeline(const SpecConstants &_constants) const;
     void connectPipelines();
     virtual void cmdDispatch(VkCommandBuffer commandBuffer);
+    void cmdDispatchVector(VkCommandBuffer commandBuffer, uint32_t set, uint32_t valuesPerInvocation);
 
     std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> loader;
     VkDevice device;
@@ -966,6 +967,8 @@ class Resize : public ComputePipeline {
     SpirvBinary createSpirv(const std::shared_ptr<PipelineCache> &pipelineCache,
                             const std::shared_ptr<TensorDescriptor> &input,
                             const std::shared_ptr<TensorDescriptor> &output) const;
+
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
 
     PushConstant pushConstant;
 

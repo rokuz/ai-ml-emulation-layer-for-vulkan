@@ -575,6 +575,18 @@ void ComputePipeline::cmdDispatch(VkCommandBuffer commandBuffer) {
     loader->vkCmdDispatch(commandBuffer, groupCountX, groupCountY, 1);
 }
 
+void ComputePipeline::cmdDispatchVector(VkCommandBuffer commandBuffer, const uint32_t set,
+                                        const uint32_t valuesPerInvocation) {
+    const auto &dimensions = pipelineLayout->getTensorForSet(set)->getDimensions();
+    uint32_t size = divideRoundUp(static_cast<uint32_t>(dimensions.back()), valuesPerInvocation);
+    for (size_t i = 0; i + 1 < dimensions.size(); i++) {
+        size *= static_cast<uint32_t>(dimensions[i]);
+    }
+
+    const auto groupCount = static_cast<uint32_t>(std::ceil(std::sqrt(double(divideRoundUp(size, warp1D)))));
+    loader->vkCmdDispatch(commandBuffer, groupCount, groupCount, 1);
+}
+
 VkPipeline ComputePipeline::createComputePipeline(const SpecConstants &_constants) const {
     static const bool specialize = []() {
         const char *const value = std::getenv("VMEL_DISABLE_SPECIALIZATION");
@@ -2041,6 +2053,13 @@ DescriptorMap Resize::createDescriptorMap(const std::shared_ptr<TensorDescriptor
     };
 
     return descriptorMap;
+}
+
+void Resize::cmdDispatch(VkCommandBuffer commandBuffer) {
+    const VkFormat format = pipelineLayout->getTensorForSet(0)->getFormat();
+    const bool scalarFloat = format == VK_FORMAT_R16_SFLOAT || format == VK_FORMAT_R32_SFLOAT ||
+                             format == VK_FORMAT_R16_SFLOAT_FPENCODING_BFLOAT16_ARM;
+    cmdDispatchVector(commandBuffer, 0, scalarFloat ? 1u : 4u);
 }
 
 SpirvBinary Resize::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCache,
