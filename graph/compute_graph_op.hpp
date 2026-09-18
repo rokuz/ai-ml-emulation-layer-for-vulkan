@@ -307,6 +307,8 @@ class ArithmeticRightShift : public ComputePipeline {
 
     PushConstant pushConstant;
 
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     static constexpr std::string_view shaderName = "arithmetic_right_shift";
 };
 
@@ -703,6 +705,8 @@ class Gather : public ComputePipeline {
                             const std::shared_ptr<TensorDescriptor> &indices,
                             const std::shared_ptr<TensorDescriptor> &output) const;
 
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     static constexpr std::string_view shaderName = "gather";
 };
 
@@ -804,6 +808,8 @@ class Mul : public ComputePipeline {
                             const std::shared_ptr<TensorDescriptor> &output) const;
 
     PushConstant pushConstant;
+
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
 
     static constexpr std::string_view shaderName = "mul";
 };
@@ -938,6 +944,8 @@ class Rescale : public ComputePipeline {
 
     PushConstant pushConstant;
 
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     static constexpr std::string_view shaderName = "rescale";
 };
 
@@ -1069,6 +1077,8 @@ class Scatter : public ComputePipeline {
                             const std::shared_ptr<TensorDescriptor> &indices,
                             const std::shared_ptr<TensorDescriptor> &output) const;
 
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     static constexpr std::string_view shaderName = "scatter";
 };
 
@@ -1091,6 +1101,8 @@ class Select : public ComputePipeline {
 
     SpirvBinary createSpirv(const std::shared_ptr<PipelineCache> &pipelineCache,
                             const std::shared_ptr<TensorDescriptor> &output) const;
+
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
 
     static constexpr std::string_view shaderName = "select";
 };

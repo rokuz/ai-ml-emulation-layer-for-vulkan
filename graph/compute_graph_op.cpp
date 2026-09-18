@@ -758,6 +758,8 @@ SpirvBinary ArithmeticRightShift::createSpirv(const std::shared_ptr<PipelineCach
                                   });
 }
 
+void ArithmeticRightShift::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * AvgPool2D
  *******************************************************************************/
@@ -1588,6 +1590,8 @@ SpirvBinary Gather::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
                                   });
 }
 
+void Gather::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * Matmul
  *******************************************************************************/
@@ -1773,6 +1777,8 @@ SpirvBinary Mul::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCach
                                       {"%out_t%", outType->glslType},
                                   });
 }
+
+void Mul::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * Negate
@@ -1999,6 +2005,8 @@ SpirvBinary Rescale::createSpirv(const std::shared_ptr<PipelineCache> &_pipeline
                                       {"%out_t_max%", outType->max},
                                   });
 }
+
+void Rescale::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * Reshape
@@ -2230,6 +2238,8 @@ SpirvBinary Scatter::createSpirv(const std::shared_ptr<PipelineCache> &_pipeline
                                   });
 }
 
+void Scatter::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * Select
  *******************************************************************************/
@@ -2269,6 +2279,8 @@ SpirvBinary Select::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
                                       {"%in_out_t%", inOutType->glslType},
                                   });
 }
+
+void Select::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * Slice

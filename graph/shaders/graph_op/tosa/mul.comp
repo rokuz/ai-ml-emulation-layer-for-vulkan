@@ -22,40 +22,61 @@ layout(set = 1, binding = 0) uniform tensorARM<IN_T, RANK_IN> inputData1;
 layout(set = 2, binding = 0) uniform tensorARM<IN_T, RANK_IN> inputData2;
 
 void main() {
+    uint[RANK_OUT] shape;
+    getShape(shape, outputData)
     uint[RANK_OUT] index;
-    getDispatchIndex(outputData, index);
+    getVectorIndex(index, shape)
 
     uint[RANK_IN] inputShape1;
     uint[RANK_IN] inputIndex1;
-    IN_T value1;
+    IN_T value1[4];
 
     getShape(inputShape1, inputData1);
     applyBroadcast(inputShape1, index, inputIndex1);
-    tensorReadARM(inputData1, inputIndex1, value1);
+    if (inputShape1[RANK_IN - 1] == 1u) {
+        IN_T broadcast;
+        tensorReadARM(inputData1, inputIndex1, broadcast);
+        value1 = IN_T[4](broadcast, broadcast, broadcast, broadcast);
+    } else {
+        tensorReadARM(inputData1, inputIndex1, value1);
+    }
 
     uint[RANK_IN] inputShape2;
     uint[RANK_IN] inputIndex2;
-    IN_T value2;
+    IN_T value2[4];
 
     getShape(inputShape2, inputData2);
     applyBroadcast(inputShape2, index, inputIndex2);
-    tensorReadARM(inputData2, inputIndex2, value2);
-
-#if IS_BFLOAT(TYPE_IN)
-    float f1 = DECODE_STORAGE_TO_COMP(value1, TYPE_IN, float);
-    float f2 = DECODE_STORAGE_TO_COMP(value2, TYPE_IN, float);
-    OUT_T result = ENCODE_COMP_TO_STORAGE_RNE(f1 * f2, OUT_T, TYPE_OUT);
-#elif IS_FLOAT(TYPE_IN)
-    OUT_T result = OUT_T(value1) * OUT_T(value2);
-#else
-    const uint shift = PUSH_UINT(0, shift);
-
-    int64_t result = int64_t(value1) * int64_t(value2);
-
-    if (shift > 0) {
-        result = (result + (int64_t(1) << (shift - 1))) >> shift;
+    if (inputShape2[RANK_IN - 1] == 1u) {
+        IN_T broadcast;
+        tensorReadARM(inputData2, inputIndex2, broadcast);
+        value2 = IN_T[4](broadcast, broadcast, broadcast, broadcast);
+    } else {
+        tensorReadARM(inputData2, inputIndex2, value2);
     }
+
+#if !IS_BFLOAT(TYPE_IN) && !IS_FLOAT(TYPE_IN)
+    const uint shift = PUSH_UINT(0, shift);
 #endif
 
-    tensorWriteARM(outputData, index, OUT_T(result));
+    OUT_T result[4];
+    for (uint k = 0; k < 4; k++) {
+#if IS_BFLOAT(TYPE_IN)
+        float f1 = DECODE_STORAGE_TO_COMP(value1[k], TYPE_IN, float);
+        float f2 = DECODE_STORAGE_TO_COMP(value2[k], TYPE_IN, float);
+        result[k] = ENCODE_COMP_TO_STORAGE_RNE(f1 * f2, OUT_T, TYPE_OUT);
+#elif IS_FLOAT(TYPE_IN)
+        result[k] = OUT_T(value1[k]) * OUT_T(value2[k]);
+#else
+        int64_t product = int64_t(value1[k]) * int64_t(value2[k]);
+
+        if (shift > 0) {
+            product = (product + (int64_t(1) << (shift - 1))) >> shift;
+        }
+
+        result[k] = OUT_T(product);
+#endif
+    }
+
+    tensorWriteARM(outputData, index, result);
 }

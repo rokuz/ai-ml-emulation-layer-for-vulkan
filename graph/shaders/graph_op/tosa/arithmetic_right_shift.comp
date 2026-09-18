@@ -19,8 +19,10 @@ layout(set = 1, binding = 0) uniform tensorARM<IN_OUT_T, RANK_IN> inputData1;
 layout(set = 2, binding = 0) uniform tensorARM<IN_OUT_T, RANK_IN> inputData2;
 
 void main() {
+    uint[RANK_OUT] shape;
+    getShape(shape, outputData)
     uint[RANK_OUT] index;
-    getDispatchIndex(outputData, index);
+    getVectorIndex(index, shape)
 
     uint[RANK_IN] inputTensor1;
     getShape(inputTensor1, inputData1);
@@ -32,18 +34,36 @@ void main() {
     uint[RANK_IN] coords2;
     applyBroadcast(inputTensor2, index, coords2);
 
-    IN_OUT_T value1;
-    tensorReadARM(inputData1, coords1, value1);
-    IN_OUT_T value2;
-    tensorReadARM(inputData2, coords2, value2);
+    IN_OUT_T value1[4];
+    if (inputTensor1[RANK_IN - 1] == 1u) {
+        IN_OUT_T broadcast;
+        tensorReadARM(inputData1, coords1, broadcast);
+        value1 = IN_OUT_T[4](broadcast, broadcast, broadcast, broadcast);
+    } else {
+        tensorReadARM(inputData1, coords1, value1);
+    }
 
-    IN_OUT_T result = value1 >> value2;
+    IN_OUT_T value2[4];
+    if (inputTensor2[RANK_IN - 1] == 1u) {
+        IN_OUT_T broadcast;
+        tensorReadARM(inputData2, coords2, broadcast);
+        value2 = IN_OUT_T[4](broadcast, broadcast, broadcast, broadcast);
+    } else {
+        tensorReadARM(inputData2, coords2, value2);
+    }
 
     const bool round = PUSH_UINT(0, round) != 0;
-    if (round && value2 > 0) {
-        if (((value1 >> IN_OUT_T(value2 - 1)) & 1) != 0) {
-            result++;
+
+    IN_OUT_T result[4];
+    for (uint k = 0; k < 4; k++) {
+        result[k] = value1[k] >> value2[k];
+
+        if (round && value2[k] > 0) {
+            if (((value1[k] >> IN_OUT_T(value2[k] - 1)) & 1) != 0) {
+                result[k]++;
+            }
         }
     }
+
     tensorWriteARM(outputData, index, result);
 }

@@ -25,27 +25,34 @@ layout(set = 2, binding = 0) uniform tensorARM<MUL_T, 1> multiplier;
 layout(set = 3, binding = 0) uniform tensorARM<int8_t, 1> shiftData;
 
 void main() {
+    uint[RANK] shape;
+    getShape(shape, outputData)
     uint[RANK] index;
-    getDispatchIndex(outputData, index);
+    getVectorIndex(index, shape)
 
     const bool scale32 = SCALE32 != 0;
     const bool doubleRound = DOUBLE_ROUND != 0;
     const bool perChannel = PER_CHANNEL != 0;
-    const uint c = perChannel ? index[RANK - 1] : uint(0);
+    const uint lastChannel = shape[RANK - 1] - 1u;
 
-    IN_T val;
+    IN_T val[4];
     tensorReadARM(inputData, index, val);
-    int64_t value = int64_t(val) - int64_t(IN_T(PUSH_INT(0, inputZeroPoint)));
 
-    MUL_T mulVal;
-    tensorReadARM(multiplier, uint[1](c), mulVal);
+    OUT_T outValue[4];
+    for (uint k = 0; k < 4; k++) {
+        const uint c = perChannel ? min(index[RANK - 1] + k, lastChannel) : uint(0);
+        int64_t value = int64_t(val[k]) - int64_t(IN_T(PUSH_INT(0, inputZeroPoint)));
 
-    int8_t shiftVal;
-    tensorReadARM(shiftData, uint[1](c), shiftVal);
+        MUL_T mulVal;
+        tensorReadARM(multiplier, uint[1](c), mulVal);
 
-    int32_t result = applyScale(value, int32_t(mulVal), shiftVal, scale32 && doubleRound);
-    result += OUT_T(PUSH_INT(1, outputZeroPoint));
-    result = int32_t(clamp(result, OUT_T(%out_t_lowest%), OUT_T(%out_t_max%)));
+        int8_t shiftVal;
+        tensorReadARM(shiftData, uint[1](c), shiftVal);
 
-    tensorWriteARM(outputData, index, OUT_T(result));
+        int32_t result = applyScale(value, int32_t(mulVal), shiftVal, scale32 && doubleRound);
+        result += OUT_T(PUSH_INT(1, outputZeroPoint));
+        outValue[k] = OUT_T(int32_t(clamp(result, OUT_T(%out_t_lowest%), OUT_T(%out_t_max%))));
+    }
+
+    tensorWriteARM(outputData, index, outValue);
 }

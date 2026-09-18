@@ -15,28 +15,51 @@ layout(set = 2, binding = 0) uniform tensorARM<IN_OUT_T, RANK> inputData2;
 layout(set = 3, binding = 0) uniform tensorARM<IN_OUT_T, RANK> inputData3;
 
 void main() {
+    uint[RANK] shape;
+    getShape(shape, outputData)
     uint[RANK] index;
-    getDispatchIndex(outputData, index);
+    getVectorIndex(index, shape)
 
     uint[RANK] inputShape;
     uint[RANK] inputIndex;
-    uint8_t value1;
 
+    uint8_t value1[4];
     getShape(inputShape, inputData1);
     applyBroadcast(inputShape, index, inputIndex);
-    tensorReadARM(inputData1, inputIndex, value1);
-
-    IN_OUT_T result;
-
-    if (value1 != 0) {
-        getShape(inputShape, inputData2);
-        applyBroadcast(inputShape, index, inputIndex);
-        tensorReadARM(inputData2, inputIndex, result);
+    if (inputShape[RANK - 1] == 1u) {
+        uint8_t broadcast;
+        tensorReadARM(inputData1, inputIndex, broadcast);
+        value1 = uint8_t[4](broadcast, broadcast, broadcast, broadcast);
     } else {
-        getShape(inputShape, inputData3);
-        applyBroadcast(inputShape, index, inputIndex);
-        tensorReadARM(inputData3, inputIndex, result);
+        tensorReadARM(inputData1, inputIndex, value1);
     }
 
-    tensorWriteARM(outputData, index, IN_OUT_T(result));
+    IN_OUT_T value2[4];
+    getShape(inputShape, inputData2);
+    applyBroadcast(inputShape, index, inputIndex);
+    if (inputShape[RANK - 1] == 1u) {
+        IN_OUT_T broadcast;
+        tensorReadARM(inputData2, inputIndex, broadcast);
+        value2 = IN_OUT_T[4](broadcast, broadcast, broadcast, broadcast);
+    } else {
+        tensorReadARM(inputData2, inputIndex, value2);
+    }
+
+    IN_OUT_T value3[4];
+    getShape(inputShape, inputData3);
+    applyBroadcast(inputShape, index, inputIndex);
+    if (inputShape[RANK - 1] == 1u) {
+        IN_OUT_T broadcast;
+        tensorReadARM(inputData3, inputIndex, broadcast);
+        value3 = IN_OUT_T[4](broadcast, broadcast, broadcast, broadcast);
+    } else {
+        tensorReadARM(inputData3, inputIndex, value3);
+    }
+
+    IN_OUT_T result[4];
+    for (uint k = 0; k < 4; k++) {
+        result[k] = value1[k] != 0 ? value2[k] : value3[k];
+    }
+
+    tensorWriteARM(outputData, index, result);
 }
