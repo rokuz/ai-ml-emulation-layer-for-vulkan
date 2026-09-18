@@ -306,6 +306,22 @@ std::shared_ptr<TensorDescriptor> GraphExtInstContext::getOrMakeCompositeTensor(
     return tensor;
 }
 
+bool GraphExtInstContext::isProduced(const uint32_t id) const {
+    switch (irContext.get_def_use_mgr()->GetDef(id)->opcode()) {
+    case spv::Op::OpConstantComposite:
+    case spv::Op::OpConstantCompositeReplicateEXT:
+    case spv::Op::OpConstantNull:
+    case spv::Op::OpGraphConstantARM:
+    case spv::Op::OpGraphInputARM:
+    case spv::Op::OpVariable:
+        return true;
+    default: {
+        const auto it = tensorMap.find(id);
+        return it != tensorMap.end() && it->second[0] != nullptr;
+    }
+    }
+}
+
 std::shared_ptr<TensorDescriptor> GraphExtInstContext::makeCompositeTensor(const uint32_t id) const {
     const auto *instruction = irContext.get_def_use_mgr()->GetDef(id);
     const auto *tensorType = getTensorType(instruction->type_id());

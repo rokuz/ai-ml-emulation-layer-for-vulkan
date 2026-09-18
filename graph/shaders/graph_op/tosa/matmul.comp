@@ -5,6 +5,17 @@
 
 #define IN_T %in_t%
 #define OUT_T %out_t%
+#define RESCALE_TAIL %rescale_tail%
+#if RESCALE_TAIL
+#define TAIL_OUT_T %tail_out_t%
+#define TAIL_MUL_T %tail_mul_t%
+#define TAIL_OUT_LOWEST %tail_out_t_lowest%
+#define TAIL_OUT_MAX %tail_out_t_max%
+#define OUTPUT_T TAIL_OUT_T
+RESCALE_TAIL_DECLARE(3, 4)
+#else
+#define OUTPUT_T OUT_T
+#endif
 #define TYPE_IN %in_t_type%
 #define TYPE_OUT %out_t_type%
 
@@ -23,7 +34,7 @@ layout(push_constant) uniform PushConstants {
     int32_t inputZeroPoint2;
 } pushConstants;
 
-layout(set = 0, binding = 0) uniform tensorARM<OUT_T, 3> outputData;   // [N, H, W]
+layout(set = 0, binding = 0) uniform tensorARM<OUTPUT_T, 3> outputData;   // [N, H, W]
 layout(set = 1, binding = 0) uniform tensorARM<IN_T, 3> inputData1;    // [N, H, C]
 layout(set = 2, binding = 0) uniform tensorARM<IN_T, 3> inputData2;    // [N, C, W]
 
@@ -72,5 +83,11 @@ void main() {
     }
 
     OUT_T outValue = ENCODE_COMP_TO_STORAGE(acc, OUT_T, TYPE_OUT);
+#if RESCALE_TAIL
+    TAIL_OUT_T tailValue;
+    rescaleTail(outValue, ox, tailValue)
+    tensorWriteARM(outputData, index, tailValue);
+#else
     tensorWriteARM(outputData, index, outValue);
+#endif
 }

@@ -27,6 +27,12 @@
 #include <utility>
 #include <vector>
 
+namespace mlsdk::el::compute {
+
+VkFormat accTypeVkFormat(uint32_t accType);
+
+} // namespace mlsdk::el::compute
+
 namespace mlsdk::el::compute::graph_op {
 
 enum NanPropagationMode {
@@ -195,6 +201,17 @@ using ComputePipelineDispatchDecorator =
  *******************************************************************************/
 
 using SpecConstants = std::vector<uint32_t>;
+
+struct RescaleTail {
+    VkFormat inputFormat = VK_FORMAT_R32_SINT;
+    std::shared_ptr<TensorDescriptor> multiplier;
+    std::shared_ptr<TensorDescriptor> shift;
+    int32_t inputZeroPoint = 0;
+    int32_t outputZeroPoint = 0;
+    bool scale32 = false;
+    bool doubleRound = false;
+    bool perChannel = false;
+};
 
 class ComputePipeline : public ComputePipelineBase {
   public:
@@ -424,7 +441,7 @@ class Conv2D : public ComputePipeline {
            const std::shared_ptr<TensorDescriptor> &_biases, const std::vector<int32_t> &_pad,
            const std::vector<int32_t> &_stride, const std::vector<int32_t> &_dilation, int8_t _inputZeroPoint,
            int8_t _weightZeroPoint, uint32_t _accType, const std::array<uint32_t, 3> &_maxGroupCount,
-           const std::string &debugName);
+           const std::string &debugName, const RescaleTail *_tail = nullptr);
 
   private:
     struct PushConstant {
@@ -443,12 +460,13 @@ class Conv2D : public ComputePipeline {
     DescriptorMap createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input,
                                       const std::shared_ptr<TensorDescriptor> &output,
                                       const std::shared_ptr<TensorDescriptor> &weights,
-                                      const std::shared_ptr<TensorDescriptor> &biases) const;
+                                      const std::shared_ptr<TensorDescriptor> &biases, const RescaleTail *tail) const;
 
     SpirvBinary createSpirv(const std::shared_ptr<PipelineCache> &pipelineCache,
                             const std::shared_ptr<TensorDescriptor> &input,
                             const std::shared_ptr<TensorDescriptor> &output,
-                            const std::shared_ptr<TensorDescriptor> &weights, uint32_t accType) const;
+                            const std::shared_ptr<TensorDescriptor> &weights, uint32_t accType,
+                            const RescaleTail *tail) const;
 
     void cmdDispatch(VkCommandBuffer commandBuffer) override;
 
@@ -473,7 +491,8 @@ class Conv3D : public ComputePipeline {
            const std::shared_ptr<TensorDescriptor> &_output, const std::shared_ptr<TensorDescriptor> &_weights,
            const std::shared_ptr<TensorDescriptor> &_biases, const std::vector<int32_t> &_pad,
            const std::vector<int32_t> &_stride, const std::vector<int32_t> &_dilation, int8_t _inputZeroPoint,
-           int8_t _weightZeroPoint, uint32_t _accType, const std::string &debugName);
+           int8_t _weightZeroPoint, uint32_t _accType, const std::string &debugName,
+           const RescaleTail *_tail = nullptr);
 
   private:
     struct PushConstant {
@@ -491,12 +510,13 @@ class Conv3D : public ComputePipeline {
     DescriptorMap createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input,
                                       const std::shared_ptr<TensorDescriptor> &output,
                                       const std::shared_ptr<TensorDescriptor> &weights,
-                                      const std::shared_ptr<TensorDescriptor> &biases) const;
+                                      const std::shared_ptr<TensorDescriptor> &biases, const RescaleTail *tail) const;
 
     SpirvBinary createSpirv(const std::shared_ptr<PipelineCache> &pipelineCache,
                             const std::shared_ptr<TensorDescriptor> &input,
                             const std::shared_ptr<TensorDescriptor> &output,
-                            const std::shared_ptr<TensorDescriptor> &weights, uint32_t accType) const;
+                            const std::shared_ptr<TensorDescriptor> &weights, uint32_t accType,
+                            const RescaleTail *tail) const;
 
     PushConstant pushConstant;
 
@@ -515,7 +535,7 @@ class DepthwiseConv2D : public ComputePipeline {
                     const std::shared_ptr<TensorDescriptor> &_weights, const std::shared_ptr<TensorDescriptor> &_biases,
                     const std::vector<int32_t> &_pad, const std::vector<int32_t> &_stride,
                     const std::vector<int32_t> &_dilation, int8_t _inputZeroPoint, int8_t _weightZeroPoint,
-                    uint32_t _accType, const std::string &debugName);
+                    uint32_t _accType, const std::string &debugName, const RescaleTail *_tail = nullptr);
 
   private:
     struct PushConstant {
@@ -533,12 +553,13 @@ class DepthwiseConv2D : public ComputePipeline {
     DescriptorMap createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input,
                                       const std::shared_ptr<TensorDescriptor> &output,
                                       const std::shared_ptr<TensorDescriptor> &weights,
-                                      const std::shared_ptr<TensorDescriptor> &biases) const;
+                                      const std::shared_ptr<TensorDescriptor> &biases, const RescaleTail *tail) const;
 
     SpirvBinary createSpirv(const std::shared_ptr<PipelineCache> &pipelineCache,
                             const std::shared_ptr<TensorDescriptor> &input,
                             const std::shared_ptr<TensorDescriptor> &output,
-                            const std::shared_ptr<TensorDescriptor> &weights, uint32_t accType) const;
+                            const std::shared_ptr<TensorDescriptor> &weights, uint32_t accType,
+                            const RescaleTail *tail) const;
 
     PushConstant pushConstant;
 
@@ -661,7 +682,8 @@ class Matmul : public ComputePipeline {
     Matmul(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> &_loader, VkDevice _device,
            const std::shared_ptr<PipelineCache> &_pipelineCache, const std::shared_ptr<TensorDescriptor> &_input1,
            const std::shared_ptr<TensorDescriptor> &_input2, const std::shared_ptr<TensorDescriptor> &_output,
-           int32_t _inputZeroPoint1, int32_t _inputZeroPoint2, const std::string &debugName);
+           int32_t _inputZeroPoint1, int32_t _inputZeroPoint2, const std::string &debugName,
+           const RescaleTail *_tail = nullptr);
 
   private:
     struct PushConstant {
@@ -673,11 +695,11 @@ class Matmul : public ComputePipeline {
 
     DescriptorMap createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input1,
                                       const std::shared_ptr<TensorDescriptor> &input2,
-                                      const std::shared_ptr<TensorDescriptor> &output) const;
+                                      const std::shared_ptr<TensorDescriptor> &output, const RescaleTail *tail) const;
 
     SpirvBinary createSpirv(const std::shared_ptr<PipelineCache> &pipelineCache,
                             const std::shared_ptr<TensorDescriptor> &input1,
-                            const std::shared_ptr<TensorDescriptor> &output) const;
+                            const std::shared_ptr<TensorDescriptor> &output, const RescaleTail *tail) const;
 
     PushConstant pushConstant;
 
@@ -1139,7 +1161,8 @@ class TransposeConv2D : public ComputePipeline {
                     const std::shared_ptr<TensorDescriptor> &_input, const std::shared_ptr<TensorDescriptor> &_output,
                     const std::shared_ptr<TensorDescriptor> &_weights, const std::shared_ptr<TensorDescriptor> &_biases,
                     const std::vector<int32_t> &_outPad, const std::vector<int32_t> &_stride, int8_t _inputZeroPoint,
-                    int8_t _weightZeroPoint, uint32_t _accType, const std::string &debugName);
+                    int8_t _weightZeroPoint, uint32_t _accType, const std::string &debugName,
+                    const RescaleTail *_tail = nullptr);
 
   private:
     struct PushConstant {
@@ -1155,12 +1178,13 @@ class TransposeConv2D : public ComputePipeline {
     DescriptorMap createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input,
                                       const std::shared_ptr<TensorDescriptor> &output,
                                       const std::shared_ptr<TensorDescriptor> &weights,
-                                      const std::shared_ptr<TensorDescriptor> &biases) const;
+                                      const std::shared_ptr<TensorDescriptor> &biases, const RescaleTail *tail) const;
 
     SpirvBinary createSpirv(const std::shared_ptr<PipelineCache> &pipelineCache,
                             const std::shared_ptr<TensorDescriptor> &input,
                             const std::shared_ptr<TensorDescriptor> &output,
-                            const std::shared_ptr<TensorDescriptor> &weights, uint32_t accType) const;
+                            const std::shared_ptr<TensorDescriptor> &weights, uint32_t accType,
+                            const RescaleTail *tail) const;
 
     PushConstant pushConstant;
 
@@ -1312,13 +1336,13 @@ class GraphPipeline {
                     const std::shared_ptr<TensorDescriptor> &weights, const std::shared_ptr<TensorDescriptor> &biases,
                     const std::vector<int32_t> &pad, const std::vector<int32_t> &stride,
                     const std::vector<int32_t> &dilation, int8_t inputZeroPoint, int8_t weightZeroPoint,
-                    uint32_t accType, const std::string &debugName);
+                    uint32_t accType, const std::string &debugName, const RescaleTail *tail = nullptr);
 
     void makeConv3D(const std::shared_ptr<TensorDescriptor> &input, const std::shared_ptr<TensorDescriptor> &output,
                     const std::shared_ptr<TensorDescriptor> &weights, const std::shared_ptr<TensorDescriptor> &biases,
                     const std::vector<int32_t> &pad, const std::vector<int32_t> &stride,
                     const std::vector<int32_t> &dilation, int8_t inputZeroPoint, int8_t weightZeroPoint,
-                    uint32_t accType, const std::string &debugName);
+                    uint32_t accType, const std::string &debugName, const RescaleTail *tail = nullptr);
 
     void makeCos(const std::shared_ptr<TensorDescriptor> &input1, const std::shared_ptr<TensorDescriptor> &output,
                  const std::string &debugName);
@@ -1329,7 +1353,7 @@ class GraphPipeline {
                              const std::shared_ptr<TensorDescriptor> &biases, const std::vector<int32_t> &pad,
                              const std::vector<int32_t> &stride, const std::vector<int32_t> &dilation,
                              int8_t inputZeroPoint, int8_t weightZeroPoint, uint32_t accType,
-                             const std::string &debugName);
+                             const std::string &debugName, const RescaleTail *tail = nullptr);
 
     void makeEqual(const std::shared_ptr<TensorDescriptor> &input1, const std::shared_ptr<TensorDescriptor> &input2,
                    const std::shared_ptr<TensorDescriptor> &output, const std::string &debugName);
@@ -1394,7 +1418,7 @@ class GraphPipeline {
 
     void makeMatmul(const std::shared_ptr<TensorDescriptor> &input1, const std::shared_ptr<TensorDescriptor> &input2,
                     const std::shared_ptr<TensorDescriptor> &output, int32_t inputZeroPoint1, int32_t inputZeroPoint2,
-                    const std::string &debugName);
+                    const std::string &debugName, const RescaleTail *tail = nullptr);
 
     void makeMaxPool2D(const std::shared_ptr<TensorDescriptor> &input, const std::shared_ptr<TensorDescriptor> &output,
                        const std::vector<int32_t> &kernel, const std::vector<int32_t> &stride,
@@ -1494,7 +1518,7 @@ class GraphPipeline {
                              const std::shared_ptr<TensorDescriptor> &weights,
                              const std::shared_ptr<TensorDescriptor> &biases, const std::vector<int32_t> &pad,
                              const std::vector<int32_t> &stride, int8_t inputZeroPoint, int8_t weightZeroPoint,
-                             uint32_t accType, const std::string &debugName);
+                             uint32_t accType, const std::string &debugName, const RescaleTail *tail = nullptr);
 
     /***************************************************************************
      * Motion Engine Ops

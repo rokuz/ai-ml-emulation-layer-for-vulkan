@@ -207,6 +207,51 @@ layout(constant_id = 215) const int PUSH_WORD_15 = 0;
                                      uint(PUSH_WORD_4), uint(PUSH_WORD_5))[i]                                          \
                            : pushConstants.field[i])
 
+int32_t applyScale(int64_t value, int32_t multiplier, int8_t shift, bool doubleRound) {
+    int64_t round = int64_t(1) << (shift - 1);
+
+    if (doubleRound) {
+        if (shift > 31) {
+            if (value >= 0) {
+                round += 1 << 30;
+            }
+            else {
+                round -= 1 << 30;
+            }
+        }
+    }
+
+    int64_t result = value * multiplier;
+    result += round;
+    result >>= shift;
+
+    return int32_t(result);
+}
+
+#define RESCALE_TAIL_DECLARE(multiplierSet, shiftSet)                                                                  \
+    layout(constant_id = 0) const uint32_t TAIL_SCALE32 = 0;                                                           \
+    layout(constant_id = 1) const uint32_t TAIL_DOUBLE_ROUND = 0;                                                      \
+    layout(constant_id = 2) const uint32_t TAIL_PER_CHANNEL = 0;                                                       \
+    layout(constant_id = 3) const int32_t TAIL_INPUT_ZERO_POINT = 0;                                                   \
+    layout(constant_id = 4) const int32_t TAIL_OUTPUT_ZERO_POINT = 0;                                                  \
+    layout(set = multiplierSet, binding = 0) uniform tensorARM<TAIL_MUL_T, 1> tailMultiplier;                          \
+    layout(set = shiftSet, binding = 0) uniform tensorARM<int8_t, 1> tailShift;
+
+#define rescaleTail(inValue, channel, outValue)                                                                        \
+    {                                                                                                                  \
+        const uint tailChannel = TAIL_PER_CHANNEL != 0 ? uint(channel) : uint(0);                                      \
+        const int64_t tailInput = int64_t(inValue) - int64_t(OUT_T(TAIL_INPUT_ZERO_POINT));                            \
+        TAIL_MUL_T tailMultiplierValue;                                                                                \
+        tensorReadARM(tailMultiplier, uint[1](tailChannel), tailMultiplierValue);                                      \
+        int8_t tailShiftValue;                                                                                         \
+        tensorReadARM(tailShift, uint[1](tailChannel), tailShiftValue);                                                \
+        int32_t tailResult = applyScale(tailInput, int32_t(tailMultiplierValue), tailShiftValue,                       \
+                                        TAIL_SCALE32 != 0 && TAIL_DOUBLE_ROUND != 0);                                  \
+        tailResult += TAIL_OUT_T(TAIL_OUTPUT_ZERO_POINT);                                                              \
+        tailResult = int32_t(clamp(tailResult, TAIL_OUT_T(TAIL_OUT_LOWEST), TAIL_OUT_T(TAIL_OUT_MAX)));                \
+        outValue = TAIL_OUT_T(tailResult);                                                                             \
+    }
+
 layout(constant_id = 100) const uint DISPATCH_RANK = 0;
 layout(constant_id = 101) const uint DISPATCH_SHAPE_0 = 1;
 layout(constant_id = 102) const uint DISPATCH_SHAPE_1 = 1;

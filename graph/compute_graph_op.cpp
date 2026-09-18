@@ -36,6 +36,7 @@ void makeAndConnectVirtualTensor(const std::shared_ptr<TensorDescriptor> &tensor
         descendant->pushParent(virtualTensor);
     }
 }
+} // namespace
 
 VkFormat accTypeVkFormat(uint32_t accType) {
     switch (accType) {
@@ -51,6 +52,8 @@ VkFormat accTypeVkFormat(uint32_t accType) {
         throw std::runtime_error("Unsupported acc type " + std::to_string(accType));
     }
 }
+
+namespace {
 
 std::string_view accTypeString(uint32_t accType) {
     switch (accType) {
@@ -962,6 +965,41 @@ SpirvBinary Concat::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
                                   });
 }
 
+namespace {
+
+SpecConstants rescaleTailConstants(const RescaleTail *tail) {
+    if (tail == nullptr) {
+        return {};
+    }
+    return {tail->scale32, tail->doubleRound, tail->perChannel, static_cast<uint32_t>(tail->inputZeroPoint),
+            static_cast<uint32_t>(tail->outputZeroPoint)};
+}
+
+void appendRescaleTail(DescriptorMap &descriptorMap, const RescaleTail *tail) {
+    if (tail != nullptr) {
+        descriptorMap.emplace_back(Input, tail->multiplier);
+        descriptorMap.emplace_back(Input, tail->shift);
+    }
+}
+
+void appendRescaleTailReplacements(PipelineCache::KeyList &keys, PipelineCache::ReplaceList &replacements,
+                                   const std::shared_ptr<TensorDescriptor> &output, const RescaleTail *tail) {
+    replacements.emplace_back("%rescale_tail%", tail != nullptr ? "1" : "0");
+    if (tail == nullptr) {
+        return;
+    }
+    const auto *tailOutType = getFormatInfo(output->getFormat());
+    const auto *tailMulType = getFormatInfo(tail->multiplier->getFormat());
+    keys.push_back(tailOutType->glslType);
+    keys.push_back(tailMulType->glslType);
+    replacements.emplace_back("%tail_out_t%", tailOutType->glslType);
+    replacements.emplace_back("%tail_out_t_lowest%", tailOutType->lowest);
+    replacements.emplace_back("%tail_out_t_max%", tailOutType->max);
+    replacements.emplace_back("%tail_mul_t%", tailMulType->glslType);
+}
+
+} // namespace
+
 /*******************************************************************************
  * Conv2D
  *******************************************************************************/
@@ -972,10 +1010,11 @@ Conv2D::Conv2D(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoade
                const std::shared_ptr<TensorDescriptor> &_biases, const std::vector<int32_t> &_pad,
                const std::vector<int32_t> &_stride, const std::vector<int32_t> &_dilation, const int8_t _inputZeroPoint,
                const int8_t _weightZeroPoint, const uint32_t _accType, const std::array<uint32_t, 3> &_maxGroupCount,
-               const std::string &debugName)
-    : ComputePipeline(_loader, _device, createDescriptorMap(_input, _output, _weights, _biases),
+               const std::string &debugName, const RescaleTail *_tail)
+    : ComputePipeline(_loader, _device, createDescriptorMap(_input, _output, _weights, _biases, _tail),
                       {&pushConstant, sizeof(pushConstant)}, _pipelineCache,
-                      createSpirv(_pipelineCache, _input, _output, _weights, _accType), debugName),
+                      createSpirv(_pipelineCache, _input, _output, _weights, _accType, _tail), debugName,
+                      rescaleTailConstants(_tail)),
       pushConstant{createPushConstant(_pad, _stride, _dilation, _inputZeroPoint, _weightZeroPoint)},
       maxGroupCount{_maxGroupCount} {}
 
@@ -1008,7 +1047,8 @@ Conv2D::PushConstant Conv2D::createPushConstant(const std::vector<int32_t> &pad,
 DescriptorMap Conv2D::createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input,
                                           const std::shared_ptr<TensorDescriptor> &output,
                                           const std::shared_ptr<TensorDescriptor> &weights,
-                                          const std::shared_ptr<TensorDescriptor> &biases) const {
+                                          const std::shared_ptr<TensorDescriptor> &biases,
+                                          const RescaleTail *tail) const {
     // Configure descriptor map
     DescriptorMap descriptorMap = {
         {Output, output}, // set 0
@@ -1017,38 +1057,47 @@ DescriptorMap Conv2D::createDescriptorMap(const std::shared_ptr<TensorDescriptor
         {Input, biases},  // set 3
     };
 
+    appendRescaleTail(descriptorMap, tail);
+
     return descriptorMap;
 }
 
 SpirvBinary Conv2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCache,
                                 const std::shared_ptr<TensorDescriptor> &input,
                                 const std::shared_ptr<TensorDescriptor> &output,
-                                const std::shared_ptr<TensorDescriptor> &weights, const uint32_t accType) const {
+                                const std::shared_ptr<TensorDescriptor> &weights, const uint32_t accType,
+                                const RescaleTail *tail) const {
     const auto *inType = getFormatInfo(input->getFormat());
-    const auto *outType = getFormatInfo(output->getFormat());
+    const auto *outType = getFormatInfo(tail != nullptr ? tail->inputFormat : output->getFormat());
     const auto *weightType = getFormatInfo(weights->getFormat());
     const auto *accTypeType = getFormatInfo(accTypeVkFormat(accType));
 
-    return _pipelineCache->lookup(shaderName,
-                                  {
-                                      inType->glslType,
-                                      weightType->glslType,
-                                      outType->glslType,
-                                      accTypeType->glslType,
-                                  },
-                                  {
-                                      {"%warpX%", std::to_string(warpX)},
-                                      {"%warpY%", std::to_string(warpY)},
-                                      {"%warpZ%", std::to_string(warpZ)},
-                                      {"%in_t%", inType->glslType},
-                                      {"%in_t_type%", inType->typeId},
-                                      {"%out_t%", outType->glslType},
-                                      {"%out_t_type%", outType->typeId},
-                                      {"%weight_t%", weightType->glslType},
-                                      {"%weight_t_type%", weightType->typeId},
-                                      {"%acc_t_type%", accTypeType->typeId},
-                                      {"%acc_t%", accTypeType->glslType},
-                                  });
+    const std::string warpXValue = std::to_string(warpX);
+    const std::string warpYValue = std::to_string(warpY);
+    const std::string warpZValue = std::to_string(warpZ);
+
+    PipelineCache::KeyList keys = {
+        inType->glslType,
+        weightType->glslType,
+        outType->glslType,
+        accTypeType->glslType,
+    };
+    PipelineCache::ReplaceList replacements = {
+        {"%warpX%", warpXValue},
+        {"%warpY%", warpYValue},
+        {"%warpZ%", warpZValue},
+        {"%in_t%", inType->glslType},
+        {"%in_t_type%", inType->typeId},
+        {"%out_t%", outType->glslType},
+        {"%out_t_type%", outType->typeId},
+        {"%weight_t%", weightType->glslType},
+        {"%weight_t_type%", weightType->typeId},
+        {"%acc_t_type%", accTypeType->typeId},
+        {"%acc_t%", accTypeType->glslType},
+    };
+    appendRescaleTailReplacements(keys, replacements, output, tail);
+
+    return _pipelineCache->lookup(shaderName, keys, replacements);
 }
 
 void Conv2D::cmdDispatch(VkCommandBuffer commandBuffer) {
@@ -1087,10 +1136,12 @@ Conv3D::Conv3D(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoade
                const std::shared_ptr<TensorDescriptor> &_output, const std::shared_ptr<TensorDescriptor> &_weights,
                const std::shared_ptr<TensorDescriptor> &_biases, const std::vector<int32_t> &_pad,
                const std::vector<int32_t> &_stride, const std::vector<int32_t> &_dilation, const int8_t _inputZeroPoint,
-               const int8_t _weightZeroPoint, const uint32_t _accType, const std::string &debugName)
-    : ComputePipeline(_loader, _device, createDescriptorMap(_input, _output, _weights, _biases),
+               const int8_t _weightZeroPoint, const uint32_t _accType, const std::string &debugName,
+               const RescaleTail *_tail)
+    : ComputePipeline(_loader, _device, createDescriptorMap(_input, _output, _weights, _biases, _tail),
                       {&pushConstant, sizeof(pushConstant)}, _pipelineCache,
-                      createSpirv(_pipelineCache, _input, _output, _weights, _accType), debugName),
+                      createSpirv(_pipelineCache, _input, _output, _weights, _accType, _tail), debugName,
+                      rescaleTailConstants(_tail)),
       pushConstant{createPushConstant(_pad, _stride, _dilation, _inputZeroPoint, _weightZeroPoint)} {}
 
 Conv3D::PushConstant Conv3D::createPushConstant(const std::vector<int32_t> &pad, const std::vector<int32_t> &stride,
@@ -1125,7 +1176,8 @@ Conv3D::PushConstant Conv3D::createPushConstant(const std::vector<int32_t> &pad,
 DescriptorMap Conv3D::createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input,
                                           const std::shared_ptr<TensorDescriptor> &output,
                                           const std::shared_ptr<TensorDescriptor> &weights,
-                                          const std::shared_ptr<TensorDescriptor> &biases) const {
+                                          const std::shared_ptr<TensorDescriptor> &biases,
+                                          const RescaleTail *tail) const {
     // Configure descriptor map
     DescriptorMap descriptorMap = {
         {Output, output}, // set 0
@@ -1134,36 +1186,41 @@ DescriptorMap Conv3D::createDescriptorMap(const std::shared_ptr<TensorDescriptor
         {Input, biases},  // set 3
     };
 
+    appendRescaleTail(descriptorMap, tail);
+
     return descriptorMap;
 }
 
 SpirvBinary Conv3D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCache,
                                 const std::shared_ptr<TensorDescriptor> &input,
                                 const std::shared_ptr<TensorDescriptor> &output,
-                                const std::shared_ptr<TensorDescriptor> &weights, const uint32_t accType) const {
+                                const std::shared_ptr<TensorDescriptor> &weights, const uint32_t accType,
+                                const RescaleTail *tail) const {
     const auto *inType = getFormatInfo(input->getFormat());
-    const auto *outType = getFormatInfo(output->getFormat());
+    const auto *outType = getFormatInfo(tail != nullptr ? tail->inputFormat : output->getFormat());
     const auto *weightType = getFormatInfo(weights->getFormat());
     const auto *accTypeType = getFormatInfo(accTypeVkFormat(accType));
 
-    return _pipelineCache->lookup(shaderName,
-                                  {
-                                      inType->glslType,
-                                      weightType->glslType,
-                                      outType->glslType,
-                                      accTypeType->glslType,
-                                  },
-                                  {
-                                      {"%warpX%", warp1DSv},
-                                      {"%in_t%", inType->glslType},
-                                      {"%in_t_type%", inType->typeId},
-                                      {"%out_t%", outType->glslType},
-                                      {"%out_t_type%", outType->typeId},
-                                      {"%weight_t%", weightType->glslType},
-                                      {"%weight_t_type%", weightType->typeId},
-                                      {"%acc_t_type%", accTypeType->typeId},
-                                      {"%acc_t%", accTypeType->glslType},
-                                  });
+    PipelineCache::KeyList keys = {
+        inType->glslType,
+        weightType->glslType,
+        outType->glslType,
+        accTypeType->glslType,
+    };
+    PipelineCache::ReplaceList replacements = {
+        {"%warpX%", warp1DSv},
+        {"%in_t%", inType->glslType},
+        {"%in_t_type%", inType->typeId},
+        {"%out_t%", outType->glslType},
+        {"%out_t_type%", outType->typeId},
+        {"%weight_t%", weightType->glslType},
+        {"%weight_t_type%", weightType->typeId},
+        {"%acc_t_type%", accTypeType->typeId},
+        {"%acc_t%", accTypeType->glslType},
+    };
+    appendRescaleTailReplacements(keys, replacements, output, tail);
+
+    return _pipelineCache->lookup(shaderName, keys, replacements);
 }
 
 /*******************************************************************************
@@ -1178,10 +1235,11 @@ DepthwiseConv2D::DepthwiseConv2D(const std::shared_ptr<VULKAN_HPP_NAMESPACE::det
                                  const std::shared_ptr<TensorDescriptor> &_biases, const std::vector<int32_t> &_pad,
                                  const std::vector<int32_t> &_stride, const std::vector<int32_t> &_dilation,
                                  const int8_t _inputZeroPoint, const int8_t _weightZeroPoint, const uint32_t _accType,
-                                 const std::string &debugName)
-    : ComputePipeline(_loader, _device, createDescriptorMap(_input, _output, _weights, _biases),
+                                 const std::string &debugName, const RescaleTail *_tail)
+    : ComputePipeline(_loader, _device, createDescriptorMap(_input, _output, _weights, _biases, _tail),
                       {&pushConstant, sizeof(pushConstant)}, _pipelineCache,
-                      createSpirv(_pipelineCache, _input, _output, _weights, _accType), debugName),
+                      createSpirv(_pipelineCache, _input, _output, _weights, _accType, _tail), debugName,
+                      rescaleTailConstants(_tail)),
       pushConstant{createPushConstant(_pad, _stride, _dilation, _inputZeroPoint, _weightZeroPoint)} {}
 
 DepthwiseConv2D::PushConstant DepthwiseConv2D::createPushConstant(const std::vector<int32_t> &pad,
@@ -1214,7 +1272,8 @@ DepthwiseConv2D::PushConstant DepthwiseConv2D::createPushConstant(const std::vec
 DescriptorMap DepthwiseConv2D::createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input,
                                                    const std::shared_ptr<TensorDescriptor> &output,
                                                    const std::shared_ptr<TensorDescriptor> &weights,
-                                                   const std::shared_ptr<TensorDescriptor> &biases) const {
+                                                   const std::shared_ptr<TensorDescriptor> &biases,
+                                                   const RescaleTail *tail) const {
     // Configure descriptor map
     DescriptorMap descriptorMap = {
         {Output, output}, // set 0
@@ -1223,37 +1282,41 @@ DescriptorMap DepthwiseConv2D::createDescriptorMap(const std::shared_ptr<TensorD
         {Input, biases},  // set 3
     };
 
+    appendRescaleTail(descriptorMap, tail);
+
     return descriptorMap;
 }
 
 SpirvBinary DepthwiseConv2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCache,
                                          const std::shared_ptr<TensorDescriptor> &input,
                                          const std::shared_ptr<TensorDescriptor> &output,
-                                         const std::shared_ptr<TensorDescriptor> &weights,
-                                         const uint32_t accType) const {
+                                         const std::shared_ptr<TensorDescriptor> &weights, const uint32_t accType,
+                                         const RescaleTail *tail) const {
     const auto *inType = getFormatInfo(input->getFormat());
-    const auto *outType = getFormatInfo(output->getFormat());
+    const auto *outType = getFormatInfo(tail != nullptr ? tail->inputFormat : output->getFormat());
     const auto *weightType = getFormatInfo(weights->getFormat());
     const auto *accTypeType = getFormatInfo(accTypeVkFormat(accType));
 
-    return _pipelineCache->lookup(shaderName,
-                                  {
-                                      inType->glslType,
-                                      weightType->glslType,
-                                      outType->glslType,
-                                      accTypeType->glslType,
-                                  },
-                                  {
-                                      {"%warpX%", warp1DSv},
-                                      {"%in_t%", inType->glslType},
-                                      {"%in_t_type%", inType->typeId},
-                                      {"%out_t%", outType->glslType},
-                                      {"%out_t_type%", outType->typeId},
-                                      {"%weight_t%", weightType->glslType},
-                                      {"%weight_t_type%", weightType->typeId},
-                                      {"%acc_t_type%", accTypeType->typeId},
-                                      {"%acc_t%", accTypeType->glslType},
-                                  });
+    PipelineCache::KeyList keys = {
+        inType->glslType,
+        weightType->glslType,
+        outType->glslType,
+        accTypeType->glslType,
+    };
+    PipelineCache::ReplaceList replacements = {
+        {"%warpX%", warp1DSv},
+        {"%in_t%", inType->glslType},
+        {"%in_t_type%", inType->typeId},
+        {"%out_t%", outType->glslType},
+        {"%out_t_type%", outType->typeId},
+        {"%weight_t%", weightType->glslType},
+        {"%weight_t_type%", weightType->typeId},
+        {"%acc_t_type%", accTypeType->typeId},
+        {"%acc_t%", accTypeType->glslType},
+    };
+    appendRescaleTailReplacements(keys, replacements, output, tail);
+
+    return _pipelineCache->lookup(shaderName, keys, replacements);
 }
 
 /*******************************************************************************
@@ -1445,10 +1508,11 @@ SpirvBinary Gather::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
 Matmul::Matmul(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> &_loader, VkDevice _device,
                const std::shared_ptr<PipelineCache> &_pipelineCache, const std::shared_ptr<TensorDescriptor> &_input1,
                const std::shared_ptr<TensorDescriptor> &_input2, const std::shared_ptr<TensorDescriptor> &_output,
-               const int32_t _inputZeroPoint1, const int32_t _inputZeroPoint2, const std::string &debugName)
-    : ComputePipeline(_loader, _device, createDescriptorMap(_input1, _input2, _output),
+               const int32_t _inputZeroPoint1, const int32_t _inputZeroPoint2, const std::string &debugName,
+               const RescaleTail *_tail)
+    : ComputePipeline(_loader, _device, createDescriptorMap(_input1, _input2, _output, _tail),
                       {&pushConstant, sizeof(pushConstant)}, _pipelineCache,
-                      createSpirv(_pipelineCache, _input1, _output), debugName),
+                      createSpirv(_pipelineCache, _input1, _output, _tail), debugName, rescaleTailConstants(_tail)),
       pushConstant{createPushConstant(_inputZeroPoint1, _inputZeroPoint2)} {}
 
 Matmul::PushConstant Matmul::createPushConstant(const int32_t inputZeroPoint1, const int32_t inputZeroPoint2) const {
@@ -1462,7 +1526,8 @@ Matmul::PushConstant Matmul::createPushConstant(const int32_t inputZeroPoint1, c
 
 DescriptorMap Matmul::createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input1,
                                           const std::shared_ptr<TensorDescriptor> &input2,
-                                          const std::shared_ptr<TensorDescriptor> &output) const {
+                                          const std::shared_ptr<TensorDescriptor> &output,
+                                          const RescaleTail *tail) const {
     // Configure descriptor map
     DescriptorMap descriptorMap = {
         {Output, output}, // set 0
@@ -1470,27 +1535,28 @@ DescriptorMap Matmul::createDescriptorMap(const std::shared_ptr<TensorDescriptor
         {Input, input2},  // set 2
     };
 
+    appendRescaleTail(descriptorMap, tail);
+
     return descriptorMap;
 }
 
 SpirvBinary Matmul::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCache,
                                 const std::shared_ptr<TensorDescriptor> &input1,
-                                const std::shared_ptr<TensorDescriptor> &output) const {
+                                const std::shared_ptr<TensorDescriptor> &output, const RescaleTail *tail) const {
     const auto *inType = getFormatInfo(input1->getFormat());
-    const auto *outType = getFormatInfo(output->getFormat());
+    const auto *outType = getFormatInfo(tail != nullptr ? tail->inputFormat : output->getFormat());
 
-    return _pipelineCache->lookup(shaderName,
-                                  {
-                                      inType->glslType,
-                                      outType->glslType,
-                                  },
-                                  {
-                                      {"%warpX%", warp1DSv},
-                                      {"%in_t%", inType->glslType},
-                                      {"%in_t_type%", inType->typeId},
-                                      {"%out_t%", outType->glslType},
-                                      {"%out_t_type%", outType->typeId},
-                                  });
+    PipelineCache::KeyList keys = {
+        inType->glslType,
+        outType->glslType,
+    };
+    PipelineCache::ReplaceList replacements = {
+        {"%warpX%", warp1DSv},          {"%in_t%", inType->glslType},      {"%in_t_type%", inType->typeId},
+        {"%out_t%", outType->glslType}, {"%out_t_type%", outType->typeId},
+    };
+    appendRescaleTailReplacements(keys, replacements, output, tail);
+
+    return _pipelineCache->lookup(shaderName, keys, replacements);
 }
 
 /*******************************************************************************
@@ -2273,10 +2339,12 @@ TransposeConv2D::TransposeConv2D(const std::shared_ptr<VULKAN_HPP_NAMESPACE::det
                                  const std::shared_ptr<TensorDescriptor> &_weights,
                                  const std::shared_ptr<TensorDescriptor> &_biases, const std::vector<int32_t> &_outPad,
                                  const std::vector<int32_t> &_stride, const int8_t _inputZeroPoint,
-                                 const int8_t _weightZeroPoint, const uint32_t _accType, const std::string &debugName)
-    : ComputePipeline(_loader, _device, createDescriptorMap(_input, _output, _weights, _biases),
+                                 const int8_t _weightZeroPoint, const uint32_t _accType, const std::string &debugName,
+                                 const RescaleTail *_tail)
+    : ComputePipeline(_loader, _device, createDescriptorMap(_input, _output, _weights, _biases, _tail),
                       {&pushConstant, sizeof(pushConstant)}, _pipelineCache,
-                      createSpirv(_pipelineCache, _input, _output, _weights, _accType), debugName),
+                      createSpirv(_pipelineCache, _input, _output, _weights, _accType, _tail), debugName,
+                      rescaleTailConstants(_tail)),
       pushConstant{createPushConstant(_outPad, _stride, _inputZeroPoint, _weightZeroPoint)} {}
 
 TransposeConv2D::PushConstant TransposeConv2D::createPushConstant(const std::vector<int32_t> &outPad,
@@ -2304,7 +2372,8 @@ TransposeConv2D::PushConstant TransposeConv2D::createPushConstant(const std::vec
 DescriptorMap TransposeConv2D::createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input,
                                                    const std::shared_ptr<TensorDescriptor> &output,
                                                    const std::shared_ptr<TensorDescriptor> &weights,
-                                                   const std::shared_ptr<TensorDescriptor> &biases) const {
+                                                   const std::shared_ptr<TensorDescriptor> &biases,
+                                                   const RescaleTail *tail) const {
     // Configure descriptor map
     DescriptorMap descriptorMap = {
         {Output, output}, // set 0
@@ -2313,37 +2382,41 @@ DescriptorMap TransposeConv2D::createDescriptorMap(const std::shared_ptr<TensorD
         {Input, biases},  // set 3
     };
 
+    appendRescaleTail(descriptorMap, tail);
+
     return descriptorMap;
 }
 
 SpirvBinary TransposeConv2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCache,
                                          const std::shared_ptr<TensorDescriptor> &input,
                                          const std::shared_ptr<TensorDescriptor> &output,
-                                         const std::shared_ptr<TensorDescriptor> &weights,
-                                         const uint32_t accType) const {
+                                         const std::shared_ptr<TensorDescriptor> &weights, const uint32_t accType,
+                                         const RescaleTail *tail) const {
     const auto *inType = getFormatInfo(input->getFormat());
-    const auto *outType = getFormatInfo(output->getFormat());
+    const auto *outType = getFormatInfo(tail != nullptr ? tail->inputFormat : output->getFormat());
     const auto *weightType = getFormatInfo(weights->getFormat());
     const auto *accTypeType = getFormatInfo(accTypeVkFormat(accType));
 
-    return _pipelineCache->lookup(shaderName,
-                                  {
-                                      inType->glslType,
-                                      weightType->glslType,
-                                      outType->glslType,
-                                      accTypeType->glslType,
-                                  },
-                                  {
-                                      {"%warpX%", warp1DSv},
-                                      {"%in_t%", inType->glslType},
-                                      {"%in_t_type%", inType->typeId},
-                                      {"%out_t%", outType->glslType},
-                                      {"%out_t_type%", outType->typeId},
-                                      {"%weight_t%", weightType->glslType},
-                                      {"%weight_t_type%", weightType->typeId},
-                                      {"%acc_t_type%", accTypeType->typeId},
-                                      {"%acc_t%", accTypeType->glslType},
-                                  });
+    PipelineCache::KeyList keys = {
+        inType->glslType,
+        weightType->glslType,
+        outType->glslType,
+        accTypeType->glslType,
+    };
+    PipelineCache::ReplaceList replacements = {
+        {"%warpX%", warp1DSv},
+        {"%in_t%", inType->glslType},
+        {"%in_t_type%", inType->typeId},
+        {"%out_t%", outType->glslType},
+        {"%out_t_type%", outType->typeId},
+        {"%weight_t%", weightType->glslType},
+        {"%weight_t_type%", weightType->typeId},
+        {"%acc_t_type%", accTypeType->typeId},
+        {"%acc_t%", accTypeType->glslType},
+    };
+    appendRescaleTailReplacements(keys, replacements, output, tail);
+
+    return _pipelineCache->lookup(shaderName, keys, replacements);
 }
 
 /*******************************************************************************
@@ -2680,9 +2753,9 @@ void GraphPipeline::makeConv2D(const std::shared_ptr<TensorDescriptor> &input,
                                const std::shared_ptr<TensorDescriptor> &biases, const std::vector<int32_t> &pad,
                                const std::vector<int32_t> &stride, const std::vector<int32_t> &dilation,
                                const int8_t inputZeroPoint, const int8_t weightZeroPoint, const uint32_t accType,
-                               const std::string &debugName) {
+                               const std::string &debugName, const RescaleTail *tail) {
     makePipeline<Conv2D>(input, output, weights, biases, pad, stride, dilation, inputZeroPoint, weightZeroPoint,
-                         accType, maxComputeWorkGroupCount, debugName);
+                         accType, maxComputeWorkGroupCount, debugName, tail);
 }
 
 void GraphPipeline::makeConv3D(const std::shared_ptr<TensorDescriptor> &input,
@@ -2691,9 +2764,9 @@ void GraphPipeline::makeConv3D(const std::shared_ptr<TensorDescriptor> &input,
                                const std::shared_ptr<TensorDescriptor> &biases, const std::vector<int32_t> &pad,
                                const std::vector<int32_t> &stride, const std::vector<int32_t> &dilation,
                                const int8_t inputZeroPoint, const int8_t weightZeroPoint, const uint32_t accType,
-                               const std::string &debugName) {
+                               const std::string &debugName, const RescaleTail *tail) {
     makePipeline<Conv3D>(input, output, weights, biases, pad, stride, dilation, inputZeroPoint, weightZeroPoint,
-                         accType, debugName);
+                         accType, debugName, tail);
 }
 
 void GraphPipeline::makeCos(const std::shared_ptr<TensorDescriptor> &input1,
@@ -2701,13 +2774,16 @@ void GraphPipeline::makeCos(const std::shared_ptr<TensorDescriptor> &input1,
     makePipeline<ElementwiseUnary>(input1, output, debugName, "cos(value1)");
 }
 
-void GraphPipeline::makeDepthwiseConv2D(
-    const std::shared_ptr<TensorDescriptor> &input, const std::shared_ptr<TensorDescriptor> &output,
-    const std::shared_ptr<TensorDescriptor> &weights, const std::shared_ptr<TensorDescriptor> &biases,
-    const std::vector<int32_t> &pad, const std::vector<int32_t> &stride, const std::vector<int32_t> &dilation,
-    const int8_t inputZeroPoint, const int8_t weightZeroPoint, const uint32_t accType, const std::string &debugName) {
+void GraphPipeline::makeDepthwiseConv2D(const std::shared_ptr<TensorDescriptor> &input,
+                                        const std::shared_ptr<TensorDescriptor> &output,
+                                        const std::shared_ptr<TensorDescriptor> &weights,
+                                        const std::shared_ptr<TensorDescriptor> &biases,
+                                        const std::vector<int32_t> &pad, const std::vector<int32_t> &stride,
+                                        const std::vector<int32_t> &dilation, const int8_t inputZeroPoint,
+                                        const int8_t weightZeroPoint, const uint32_t accType,
+                                        const std::string &debugName, const RescaleTail *tail) {
     makePipeline<DepthwiseConv2D>(input, output, weights, biases, pad, stride, dilation, inputZeroPoint,
-                                  weightZeroPoint, accType, debugName);
+                                  weightZeroPoint, accType, debugName, tail);
 }
 
 void GraphPipeline::makeEqual(const std::shared_ptr<TensorDescriptor> &input1,
@@ -2817,8 +2893,8 @@ void GraphPipeline::makeLogicalXor(const std::shared_ptr<TensorDescriptor> &inpu
 void GraphPipeline::makeMatmul(const std::shared_ptr<TensorDescriptor> &input1,
                                const std::shared_ptr<TensorDescriptor> &input2,
                                const std::shared_ptr<TensorDescriptor> &output, const int32_t inputZeroPoint1,
-                               const int32_t inputZeroPoint2, const std::string &debugName) {
-    makePipeline<Matmul>(input1, input2, output, inputZeroPoint1, inputZeroPoint2, debugName);
+                               const int32_t inputZeroPoint2, const std::string &debugName, const RescaleTail *tail) {
+    makePipeline<Matmul>(input1, input2, output, inputZeroPoint1, inputZeroPoint2, debugName, tail);
 }
 
 void GraphPipeline::makeMaxPool2D(const std::shared_ptr<TensorDescriptor> &input,
@@ -3022,9 +3098,9 @@ void GraphPipeline::makeTransposeConv2D(const std::shared_ptr<TensorDescriptor> 
                                         const std::shared_ptr<TensorDescriptor> &biases,
                                         const std::vector<int32_t> &pad, const std::vector<int32_t> &stride,
                                         const int8_t inputZeroPoint, const int8_t weightZeroPoint,
-                                        const uint32_t accType, const std::string &debugName) {
+                                        const uint32_t accType, const std::string &debugName, const RescaleTail *tail) {
     makePipeline<TransposeConv2D>(input, output, weights, biases, pad, stride, inputZeroPoint, weightZeroPoint, accType,
-                                  debugName);
+                                  debugName, tail);
 }
 
 /*******************************************************************************

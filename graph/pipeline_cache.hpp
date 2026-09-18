@@ -30,8 +30,8 @@ using SpirvBinary = utils::Span<uint32_t>;
 
 class PipelineCache {
   public:
-    using KeyList = std::initializer_list<std::string_view>;
-    using ReplaceList = std::initializer_list<std::pair<std::string_view, std::string_view>>;
+    using KeyList = std::vector<std::string_view>;
+    using ReplaceList = std::vector<std::pair<std::string_view, std::string_view>>;
 
     PipelineCache(const void *data, size_t size, VkPipelineCache _pipelineCache);
     ~PipelineCache() = default;

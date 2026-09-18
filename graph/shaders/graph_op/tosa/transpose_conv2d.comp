@@ -5,6 +5,17 @@
 
 #define IN_T %in_t%
 #define OUT_T %out_t%
+#define RESCALE_TAIL %rescale_tail%
+#if RESCALE_TAIL
+#define TAIL_OUT_T %tail_out_t%
+#define TAIL_MUL_T %tail_mul_t%
+#define TAIL_OUT_LOWEST %tail_out_t_lowest%
+#define TAIL_OUT_MAX %tail_out_t_max%
+#define OUTPUT_T TAIL_OUT_T
+RESCALE_TAIL_DECLARE(4, 5)
+#else
+#define OUTPUT_T OUT_T
+#endif
 #define WEIGHT_T %weight_t%
 #define TYPE_IN %in_t_type%
 #define TYPE_WEIGHT %weight_t_type%
@@ -21,7 +32,7 @@ layout(push_constant) uniform PushConstants {
     int32_t stride[2];
 } pushConstants;
 
-layout(set = 0, binding = 0) uniform tensorARM<OUT_T, 4> outputData;       // [N, OH, OW, OC]
+layout(set = 0, binding = 0) uniform tensorARM<OUTPUT_T, 4> outputData;    // [N, OH, OW, OC]
 layout(set = 1, binding = 0) uniform tensorARM<IN_T, 4> inputData;         // [N, IH, IW, IC]
 layout(set = 2, binding = 0) uniform tensorARM<WEIGHT_T, 4> weightsData;   // [OC, KH, KW, IC]
 layout(set = 3, binding = 0) uniform tensorARM<OUT_T, 1> biasesData;       // [BC]
@@ -70,5 +81,11 @@ void main() {
         }
     }
 
+#if RESCALE_TAIL
+    TAIL_OUT_T tailValue;
+    rescaleTail(OUT_T(CONV_ACC_TO_OUT(acc)), oc, tailValue)
+    tensorWriteARM(outputData, index, tailValue);
+#else
     tensorWriteARM(outputData, index, OUT_T(CONV_ACC_TO_OUT(acc)));
+#endif
 }

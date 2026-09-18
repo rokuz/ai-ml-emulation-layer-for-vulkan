@@ -24,27 +24,6 @@ layout(set = 1, binding = 0) uniform tensorARM<IN_T, RANK> inputData;
 layout(set = 2, binding = 0) uniform tensorARM<MUL_T, 1> multiplier;
 layout(set = 3, binding = 0) uniform tensorARM<int8_t, 1> shiftData;
 
-int32_t applyScale(int64_t value, int32_t multiplier, int8_t shift, bool doubleRound) {
-    int64_t round = int64_t(1) << (shift - 1);
-
-    if (doubleRound) {
-        if (shift > 31) {
-            if (value >= 0) {
-                round += 1 << 30;
-            }
-            else {
-                round -= 1 << 30;
-            }
-        }
-    }
-
-    int64_t result = value * multiplier;
-    result += round;
-    result >>= shift;
-
-    return int32_t(result);
-}
-
 void main() {
     uint[RANK] index;
     getDispatchIndex(outputData, index);
