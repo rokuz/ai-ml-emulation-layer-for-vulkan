@@ -111,6 +111,10 @@ CompilerTensorAsBuffer::CompilerTensorAsBuffer(std::vector<uint32_t> spirv_) : C
         // Get tensor element type id
         uint32_t elementTypeId = get<SPIRType>(tensorTypeId).ext.tensor.type;
 
+        if (type_is_floating_point(get<SPIRType>(elementTypeId))) {
+            hasFloatTensors = true;
+        }
+
         if (auto tensorStructDoneId = typeMap[elementTypeId]; tensorStructDoneId != 0) {
             auto &tensorStructDone = get<SPIRType>(tensorStructDoneId);
             auto &tensorStructNew = get<SPIRType>(tensorTypeId);
@@ -168,6 +172,9 @@ void CompilerTensorAsBuffer::emit_header() {
     // Append definition of tensorSizeARM, tensorReadARM and tensorWriteARM macros
     // after the parent defined header
     CompilerGLSL::emit_header();
+    if (hasFloatTensors) {
+        statement("#define _EMU_GL_ARM_TENSORS_SHORT_CIRCUIT 1");
+    }
     statement(tensorDefines);
 }
 

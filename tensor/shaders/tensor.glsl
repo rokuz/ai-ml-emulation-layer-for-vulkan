@@ -23,6 +23,24 @@ const int g_TensorOperandsOutOfBoundsValue = 0x2;
 
 #define tensorSizeARM(tensor, dimension) uint(tensor.shape[dimension])
 
+#ifdef _EMU_GL_ARM_TENSORS_SHORT_CIRCUIT
+#define _emu_GL_ARM_tensors_BoundsDeclare bool _emu_GL_ARM_tensors_outOfBounds = false
+#define _emu_GL_ARM_tensors_BoundsAccumulate(condition) \
+  _emu_GL_ARM_tensors_outOfBounds = _emu_GL_ARM_tensors_outOfBounds || (condition)
+#define _emu_GL_ARM_tensors_InBounds(inCondition, outCondition) (!_emu_GL_ARM_tensors_outOfBounds && inCondition)
+#define _emu_GL_ARM_tensors_BoundsSet _emu_GL_ARM_tensors_outOfBounds = true
+#define _emu_GL_ARM_tensors_IsOutOfBounds _emu_GL_ARM_tensors_outOfBounds
+#define _emu_GL_ARM_tensors_IsInBounds !_emu_GL_ARM_tensors_outOfBounds
+#else
+#define _emu_GL_ARM_tensors_BoundsDeclare uint _emu_GL_ARM_tensors_outOfBounds = 0u
+#define _emu_GL_ARM_tensors_BoundsAccumulate(condition) _emu_GL_ARM_tensors_outOfBounds |= uint(condition)
+#define _emu_GL_ARM_tensors_InBounds(inCondition, outCondition) \
+  ((_emu_GL_ARM_tensors_outOfBounds | uint(outCondition)) == 0u)
+#define _emu_GL_ARM_tensors_BoundsSet _emu_GL_ARM_tensors_outOfBounds = 1u
+#define _emu_GL_ARM_tensors_IsOutOfBounds _emu_GL_ARM_tensors_outOfBounds != 0u
+#define _emu_GL_ARM_tensors_IsInBounds _emu_GL_ARM_tensors_outOfBounds == 0u
+#endif
+
 // Valid dimensions fit in uint: the layer derives maxPerDimensionTensorElements
 // from the uint32_t maxStorageBufferRange limit, so an in-bounds byte offset fits
 // in uint as well. An out-of-bounds coordinate sets the flag before its offset is used.
@@ -30,11 +48,10 @@ const int g_TensorOperandsOutOfBoundsValue = 0x2;
   {                                                                                                                    \
     for (int _emu_GL_ARM_tensors_i = 0; _emu_GL_ARM_tensors_i < coords.length(); ++_emu_GL_ARM_tensors_i) {            \
       uint _emu_GL_ARM_tensors_c = uint(coords[_emu_GL_ARM_tensors_i]);                                                \
-      _emu_GL_ARM_tensors_outOfBounds = _emu_GL_ARM_tensors_outOfBounds ||                                             \
-          (_emu_GL_ARM_tensors_c >= uint(tensor.shape[_emu_GL_ARM_tensors_i]));                                        \
+      _emu_GL_ARM_tensors_BoundsAccumulate(_emu_GL_ARM_tensors_c >= uint(tensor.shape[_emu_GL_ARM_tensors_i]));       \
       /* Select zero after an invalid coordinate. The equivalent */                                                    \
       /* if (!outOfBounds) { offset += contribution; } form caused a Mesa 25.2.8 llvmpipe crash. */                    \
-      _emu_GL_ARM_tensors_offset += _emu_GL_ARM_tensors_outOfBounds ? 0u :                                             \
+      _emu_GL_ARM_tensors_offset += (_emu_GL_ARM_tensors_IsOutOfBounds) ? 0u :                                         \
           _emu_GL_ARM_tensors_c * uint(tensor.stride[_emu_GL_ARM_tensors_i]);                                          \
     }                                                                                                                  \
     _emu_GL_ARM_tensors_offset /= uint(_emu_GL_ARM_tensors_TypeSize(TYPE));                                            \
@@ -42,13 +59,14 @@ const int g_TensorOperandsOutOfBoundsValue = 0x2;
 
 #define _emu_GL_ARM_tensors_read_array(tensor, tensorData, coords, value, operands, outOfBoundsValue, TYPE) {          \
   uint _emu_GL_ARM_tensors_offset = 0u;                                                                                \
-  bool _emu_GL_ARM_tensors_outOfBounds = false;                                                                        \
+  _emu_GL_ARM_tensors_BoundsDeclare;                                                                                   \
   _emu_GL_ARM_tensors_offset_of(tensor, coords, TYPE)                                                                  \
                                                                                                                        \
   uint _emu_GL_ARM_tensors_last = uint(coords[coords.length() - 1]);                                                   \
   uint _emu_GL_ARM_tensors_lastDim = uint(tensor.shape[coords.length() - 1]);                                          \
                                                                                                                        \
-  if (!_emu_GL_ARM_tensors_outOfBounds && uint(value.length()) <= _emu_GL_ARM_tensors_lastDim - _emu_GL_ARM_tensors_last) { \
+  if (_emu_GL_ARM_tensors_InBounds(uint(value.length()) <= _emu_GL_ARM_tensors_lastDim - _emu_GL_ARM_tensors_last,     \
+                                   uint(value.length()) > _emu_GL_ARM_tensors_lastDim - _emu_GL_ARM_tensors_last)) {   \
     for (int _emu_GL_ARM_tensors_i = 0; _emu_GL_ARM_tensors_i < value.length(); ++_emu_GL_ARM_tensors_i) {             \
       value[_emu_GL_ARM_tensors_i] =                                                                                   \
           TYPE(tensorData.data[_emu_GL_ARM_tensors_offset + uint(_emu_GL_ARM_tensors_i)]);                             \
@@ -56,10 +74,10 @@ const int g_TensorOperandsOutOfBoundsValue = 0x2;
   } else {                                                                                                             \
     for (int _emu_GL_ARM_tensors_i = 0; _emu_GL_ARM_tensors_i < value.length(); ++_emu_GL_ARM_tensors_i) {             \
       if (uint(_emu_GL_ARM_tensors_i) >= _emu_GL_ARM_tensors_lastDim - _emu_GL_ARM_tensors_last) {                     \
-        _emu_GL_ARM_tensors_outOfBounds = true;                                                                        \
+        _emu_GL_ARM_tensors_BoundsSet;                                                                                 \
       }                                                                                                                \
                                                                                                                        \
-      if (_emu_GL_ARM_tensors_outOfBounds) {                                                                           \
+      if (_emu_GL_ARM_tensors_IsOutOfBounds) {                                                                         \
         value[_emu_GL_ARM_tensors_i] = TYPE(outOfBoundsValue);                                                         \
       } else {                                                                                                         \
         value[_emu_GL_ARM_tensors_i] =                                                                                 \
@@ -77,13 +95,14 @@ const int g_TensorOperandsOutOfBoundsValue = 0x2;
 
 #define _emu_GL_ARM_tensors_write_array(tensor, tensorData, coords, value, operands, TYPE) {                           \
   uint _emu_GL_ARM_tensors_offset = 0u;                                                                                \
-  bool _emu_GL_ARM_tensors_outOfBounds = false;                                                                        \
+  _emu_GL_ARM_tensors_BoundsDeclare;                                                                                   \
   _emu_GL_ARM_tensors_offset_of(tensor, coords, TYPE)                                                                  \
                                                                                                                        \
   uint _emu_GL_ARM_tensors_last = uint(coords[coords.length() - 1]);                                                   \
   uint _emu_GL_ARM_tensors_lastDim = uint(tensor.shape[coords.length() - 1]);                                          \
                                                                                                                        \
-  if (!_emu_GL_ARM_tensors_outOfBounds && uint(value.length()) <= _emu_GL_ARM_tensors_lastDim - _emu_GL_ARM_tensors_last) { \
+  if (_emu_GL_ARM_tensors_InBounds(uint(value.length()) <= _emu_GL_ARM_tensors_lastDim - _emu_GL_ARM_tensors_last,     \
+                                   uint(value.length()) > _emu_GL_ARM_tensors_lastDim - _emu_GL_ARM_tensors_last)) {   \
     for (int _emu_GL_ARM_tensors_i = 0; _emu_GL_ARM_tensors_i < value.length(); ++_emu_GL_ARM_tensors_i) {             \
       tensorData.data[_emu_GL_ARM_tensors_offset + uint(_emu_GL_ARM_tensors_i)] =                                      \
           TYPE(value[_emu_GL_ARM_tensors_i]);                                                                          \
@@ -91,10 +110,10 @@ const int g_TensorOperandsOutOfBoundsValue = 0x2;
   } else {                                                                                                             \
     for (int _emu_GL_ARM_tensors_i = 0; _emu_GL_ARM_tensors_i < value.length(); ++_emu_GL_ARM_tensors_i) {             \
       if (uint(_emu_GL_ARM_tensors_i) >= _emu_GL_ARM_tensors_lastDim - _emu_GL_ARM_tensors_last) {                     \
-        _emu_GL_ARM_tensors_outOfBounds = true;                                                                        \
+        _emu_GL_ARM_tensors_BoundsSet;                                                                                 \
       }                                                                                                                \
                                                                                                                        \
-      if (!_emu_GL_ARM_tensors_outOfBounds) {                                                                          \
+      if (_emu_GL_ARM_tensors_IsInBounds) {                                                                            \
         tensorData.data[_emu_GL_ARM_tensors_offset + uint(_emu_GL_ARM_tensors_i)] =                                    \
             TYPE(value[_emu_GL_ARM_tensors_i]);                                                                        \
       }                                                                                                                \
