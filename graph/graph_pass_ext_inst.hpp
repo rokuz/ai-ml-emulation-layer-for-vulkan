@@ -28,7 +28,7 @@ class GraphPassExtInst final : public Pass {
 
     Status Process() override;
     void handleGraphs(GraphExtInstContext &loweringContext, const Decoders &decoders);
-    void handleGraph(const Graph *graph, const Decoders &decoders);
+    void handleGraph(const Graph *graph, const GraphExtInstContext &loweringContext, const Decoders &decoders);
 
     GraphPipeline &graphPipeline;
     GraphExtInstImports imports;

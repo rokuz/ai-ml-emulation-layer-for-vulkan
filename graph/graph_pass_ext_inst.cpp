@@ -45,11 +45,12 @@ void GraphPassExtInst::handleGraphs(GraphExtInstContext &loweringContext, const 
 
         loweringContext.handleGraphConstants();
         loweringContext.handleInputsAndOutputs(graphEntry);
-        handleGraph(graph, decoders);
+        handleGraph(graph, loweringContext, decoders);
     }
 }
 
-void GraphPassExtInst::handleGraph(const Graph *graph, const Decoders &decoders) {
+void GraphPassExtInst::handleGraph(const Graph *graph, const GraphExtInstContext &loweringContext,
+                                   const Decoders &decoders) {
     // Iterate over instructions in the graph
     for (const auto &opExtInst : graph->instructions()) {
 
@@ -62,6 +63,10 @@ void GraphPassExtInst::handleGraph(const Graph *graph, const Decoders &decoders)
         default:
             throw std::runtime_error(std::string("Unsupported graph instruction ") +
                                      std::to_string(static_cast<unsigned>(opExtInst->opcode())));
+        }
+
+        if (loweringContext.isMerged(opExtInst->result_id())) {
+            continue;
         }
 
         const auto importId = opExtInst->GetInOperand(0).AsId();
