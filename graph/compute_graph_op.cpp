@@ -754,6 +754,8 @@ SpirvBinary ArithmeticRightShift::createSpirv(const std::shared_ptr<PipelineCach
     return _pipelineCache->lookup(shaderName, {inOutType->glslType});
 }
 
+void ArithmeticRightShift::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * AvgPool2D
  *******************************************************************************/
@@ -1486,6 +1488,8 @@ SpirvBinary Gather::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
     return _pipelineCache->lookup(shaderName, {inOutType->glslType, indicesType->glslType});
 }
 
+void Gather::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * Matmul
  *******************************************************************************/
@@ -1652,6 +1656,8 @@ SpirvBinary Mul::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCach
 
     return _pipelineCache->lookup(shaderName, {inType->glslType, outType->glslType});
 }
+
+void Mul::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * Negate
@@ -1834,6 +1840,8 @@ SpirvBinary Rescale::createSpirv(const std::shared_ptr<PipelineCache> &_pipeline
 
     return _pipelineCache->lookup(shaderName, {inType->glslType, outType->glslType, mulType->glslType});
 }
+
+void Rescale::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * Reshape
@@ -2026,6 +2034,8 @@ SpirvBinary Scatter::createSpirv(const std::shared_ptr<PipelineCache> &_pipeline
     return _pipelineCache->lookup(shaderName, {inOutType->glslType, indicesType->glslType});
 }
 
+void Scatter::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * Select
  *******************************************************************************/
@@ -2057,6 +2067,8 @@ SpirvBinary Select::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
 
     return _pipelineCache->lookup(shaderName, {inOutType->glslType});
 }
+
+void Select::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * Slice
