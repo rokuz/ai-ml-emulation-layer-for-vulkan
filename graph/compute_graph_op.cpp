@@ -2067,6 +2067,8 @@ SpirvBinary Table::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCa
     return _pipelineCache->lookup(shaderName, {inType->glslType, outType->glslType});
 }
 
+void Table::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * Tile
  *******************************************************************************/
