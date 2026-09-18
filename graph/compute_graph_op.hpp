@@ -1109,6 +1109,8 @@ class Table : public ComputePipeline {
                                       const std::shared_ptr<TensorDescriptor> &output,
                                       const std::shared_ptr<TensorDescriptor> &table) const;
 
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     static constexpr std::string_view shaderName = "table";
 };
 
