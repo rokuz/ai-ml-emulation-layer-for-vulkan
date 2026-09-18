@@ -338,6 +338,8 @@ class AvgPool2D : public ComputePipeline {
     DescriptorMap createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input,
                                       const std::shared_ptr<TensorDescriptor> &output) const;
 
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     PushConstant pushConstant;
 
     static constexpr std::string_view shaderName = "avgpool2d";
@@ -760,6 +762,8 @@ class MaxPool2D : public ComputePipeline {
 
     DescriptorMap createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input,
                                       const std::shared_ptr<TensorDescriptor> &output) const;
+
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
 
     PushConstant pushConstant;
 

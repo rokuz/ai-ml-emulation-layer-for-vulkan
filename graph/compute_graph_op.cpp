@@ -789,6 +789,8 @@ SpirvBinary AvgPool2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipeli
     return _pipelineCache->lookup(shaderName, {inOutType->glslType, accTypeStr});
 }
 
+void AvgPool2D::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * Cast
  *******************************************************************************/
@@ -1563,6 +1565,8 @@ SpirvBinary MaxPool2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipeli
 
     return _pipelineCache->lookup(shaderName, {inOutType->glslType});
 }
+
+void MaxPool2D::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * Mul
