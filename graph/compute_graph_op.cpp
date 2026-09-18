@@ -830,6 +830,8 @@ SpirvBinary AvgPool2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipeli
                                   });
 }
 
+void AvgPool2D::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * Cast
  *******************************************************************************/
@@ -1694,6 +1696,8 @@ SpirvBinary MaxPool2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipeli
                                       {"%in_out_t_comp%", inOutType->compType},
                                   });
 }
+
+void MaxPool2D::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * Mul
