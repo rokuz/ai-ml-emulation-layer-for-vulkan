@@ -27,8 +27,11 @@ layout(set = 2, binding = 0) uniform tensorARM<WEIGHT_T, 4> weightsData;   // [O
 layout(set = 3, binding = 0) uniform tensorARM<OUT_T, 1> biasesData;       // [BC]
 
 void main() {
+    const int stride0 = PUSH_INT(6, stride[0]);
+    const int stride1 = PUSH_INT(7, stride[1]);
+
     uint[4] index;
-    getIndex4(outputData, index);
+    getDispatchIndex4(outputData, index);
 
     const uint n = index[0];
     const uint oy = index[1];
@@ -41,12 +44,12 @@ void main() {
 
     for (uint ky = 0; ky < tensorSizeARM(weightsData, 1); ky++) {
         for (uint kx = 0; kx < tensorSizeARM(weightsData, 2); kx++) {
-            int iy = int(oy) - pushConstants.pad[0] - int(ky);
-            int ix = int(ox) - pushConstants.pad[2] - int(kx);
+            int iy = int(oy) - PUSH_INT(2, pad[0]) - int(ky);
+            int ix = int(ox) - PUSH_INT(4, pad[2]) - int(kx);
 
-            if (((iy % pushConstants.stride[0]) == 0) && ((ix % pushConstants.stride[1]) == 0)) {
-                iy /= pushConstants.stride[0];
-                ix /= pushConstants.stride[1];
+            if (((iy % stride0) == 0) && ((ix % stride1) == 0)) {
+                iy /= stride0;
+                ix /= stride1;
 
                 if ((iy >= 0) && (ix >= 0) &&
                     (uint(iy) < tensorSizeARM(inputData, 1)) &&
@@ -58,8 +61,8 @@ void main() {
                         tensorReadARM(inputData, uint[](n, uint(iy), uint(ix), ic), inV);
                         tensorReadARM(weightsData, uint[](oc, ky, kx, ic), wV);
 
-                        ACC_T inAcc = CONV_TO_ACC_INPUT(inV) - ACC_T(pushConstants.inputZeroPoint);
-                        ACC_T wAcc = CONV_TO_ACC_WEIGHT(wV) - ACC_T(pushConstants.weightZeroPoint);
+                        ACC_T inAcc = CONV_TO_ACC_INPUT(inV) - ACC_T(PUSH_INT(0, inputZeroPoint));
+                        ACC_T wAcc = CONV_TO_ACC_WEIGHT(wV) - ACC_T(PUSH_INT(1, weightZeroPoint));
                         acc += inAcc * wAcc;
                     }
                 }

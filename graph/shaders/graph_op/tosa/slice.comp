@@ -19,11 +19,11 @@ layout(set = 1, binding = 0) uniform tensorARM<IN_OUT_T, RANK> inputData;
 
 void main() {
     uint[RANK] index;
-    getIndex(outputData, index);
+    getDispatchIndex(outputData, index);
 
     uint[RANK] inputIndex;
     for (uint i = 0; i < inputIndex.length(); i++) {
-        inputIndex[i] = index[i] + pushConstants.start[i];
+        inputIndex[i] = index[i] + PUSH_UINT6(start, i);
     }
 
     IN_OUT_T value;

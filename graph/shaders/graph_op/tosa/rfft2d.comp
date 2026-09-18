@@ -11,7 +11,7 @@ layout(set = 2, binding = 0) uniform tensorARM<float, 3> inputData;
 
 void main() {
     uint[3] index;
-    getIndex3(outputRealData, index);
+    getDispatchIndex3(outputRealData, index);
 
     uint on = index[0];
     uint oy = index[1];

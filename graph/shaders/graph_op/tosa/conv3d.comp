@@ -28,8 +28,12 @@ layout(set = 2, binding = 0) uniform tensorARM<WEIGHT_T, 5> weightsData;   // [O
 layout(set = 3, binding = 0) uniform tensorARM<OUT_T, 1> biasesData;       // [BC]
 
 void main() {
+    const int dilation0 = PUSH_INT(11, dilation[0]);
+    const int dilation1 = PUSH_INT(12, dilation[1]);
+    const int dilation2 = PUSH_INT(13, dilation[2]);
+
     uint[5] index;
-    getIndex5(outputData, index);
+    getDispatchIndex5(outputData, index);
 
     ACC_T acc = ACC_T(0);
 
@@ -39,9 +43,9 @@ void main() {
     uint ox = index[3];
     uint oc = index[4];
 
-    int id = int(od) * pushConstants.stride[0] - pushConstants.pad[0];
-    int iy = int(oy) * pushConstants.stride[1] - pushConstants.pad[2];
-    int ix = int(ox) * pushConstants.stride[2] - pushConstants.pad[4];
+    int id = int(od) * PUSH_INT(8, stride[0]) - PUSH_INT(2, pad[0]);
+    int iy = int(oy) * PUSH_INT(9, stride[1]) - PUSH_INT(4, pad[2]);
+    int ix = int(ox) * PUSH_INT(10, stride[2]) - PUSH_INT(6, pad[4]);
 
     int KD = int(tensorSizeARM(weightsData, 1));
     int KH = int(tensorSizeARM(weightsData, 2));
@@ -56,29 +60,29 @@ void main() {
     int kdStart = 0;
     if (dStart < 0) {
         int delta = -dStart;
-        kdStart = (delta + pushConstants.dilation[0] - 1) / pushConstants.dilation[0];
-        dStart = id + kdStart * pushConstants.dilation[0];
+        kdStart = (delta + dilation0 - 1) / dilation0;
+        dStart = id + kdStart * dilation0;
     }
 
     int yStart = iy;
     int kyStart = 0;
     if (yStart < 0) {
         int delta = -yStart;
-        kyStart = (delta + pushConstants.dilation[1] - 1) / pushConstants.dilation[1];
-        yStart = iy + kyStart * pushConstants.dilation[1];
+        kyStart = (delta + dilation1 - 1) / dilation1;
+        yStart = iy + kyStart * dilation1;
     }
 
     int xStart = ix;
     int kxStart = 0;
     if (xStart < 0) {
         int delta = -xStart;
-        kxStart = (delta + pushConstants.dilation[2] - 1) / pushConstants.dilation[2];
-        xStart = ix + kxStart * pushConstants.dilation[2];
+        kxStart = (delta + dilation2 - 1) / dilation2;
+        xStart = ix + kxStart * dilation2;
     }
 
-    for (int d = dStart, kd = kdStart; kd < KD && d < ID; ++kd, d += pushConstants.dilation[0]) {
-        for (int y = yStart, ky = kyStart; ky < KH && y < IH; ++ky, y += pushConstants.dilation[1]) {
-            for (int x = xStart, kx = kxStart; kx < KW && x < IW; ++kx, x += pushConstants.dilation[2]) {
+    for (int d = dStart, kd = kdStart; kd < KD && d < ID; ++kd, d += dilation0) {
+        for (int y = yStart, ky = kyStart; ky < KH && y < IH; ++ky, y += dilation1) {
+            for (int x = xStart, kx = kxStart; kx < KW && x < IW; ++kx, x += dilation2) {
                 for (int ic = 0; ic < IC; ++ic) {
                     IN_T inputValue;
                     tensorReadARM(inputData, uint[](n, uint(d), uint(y), uint(x), uint(ic)), inputValue);
@@ -86,8 +90,8 @@ void main() {
                     WEIGHT_T weightValue;
                     tensorReadARM(weightsData, uint[](oc, uint(kd), uint(ky), uint(kx), uint(ic)), weightValue);
 
-                    ACC_T val = CONV_TO_ACC_INPUT(inputValue) - ACC_T(pushConstants.inputZeroPoint);
-                    ACC_T wt = CONV_TO_ACC_WEIGHT(weightValue) - ACC_T(pushConstants.weightZeroPoint);
+                    ACC_T val = CONV_TO_ACC_INPUT(inputValue) - ACC_T(PUSH_INT(0, inputZeroPoint));
+                    ACC_T wt = CONV_TO_ACC_WEIGHT(weightValue) - ACC_T(PUSH_INT(1, weightZeroPoint));
                     acc += val * wt;
                 }
             }
