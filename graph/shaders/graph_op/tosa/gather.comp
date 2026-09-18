@@ -13,13 +13,15 @@ layout(set = 1, binding = 0) uniform tensorARM<IN_OUT_T, 3> valuesData;    // [N
 layout(set = 2, binding = 0) uniform tensorARM<INDEX_T, 2> indicesData;    // [N, W]
 
 void main() {
+    uint[3] shape = uint[](tensorSizeARM(outputData, 0), tensorSizeARM(outputData, 1),
+                           tensorSizeARM(outputData, 2));
     uint[3] index;
-    getDispatchIndex3(outputData, index);
+    getVectorIndex(index, shape)
 
     INDEX_T k;
     tensorReadARM(indicesData, uint[](index[0], index[1]), k);
 
-    IN_OUT_T value;
+    IN_OUT_T value[4];
     tensorReadARM(valuesData, uint[](index[0], uint(k), index[2]), value);
 
     tensorWriteARM(outputData, index, value);
