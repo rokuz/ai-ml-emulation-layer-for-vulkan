@@ -1525,6 +1525,11 @@ SpirvBinary Matmul::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
     return _pipelineCache->lookup(shaderName, keys);
 }
 
+void Matmul::cmdDispatch(VkCommandBuffer commandBuffer) {
+    const auto *inType = getFormatInfo(pipelineLayout->getTensorForSet(1)->getFormat());
+    cmdDispatchVector(commandBuffer, 0, inType->isInteger ? 4u : 1u);
+}
+
 /*******************************************************************************
  * MaxPool2D
  *******************************************************************************/
