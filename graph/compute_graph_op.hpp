@@ -1008,6 +1008,8 @@ class Reverse : public ComputePipeline {
 
     PushConstant pushConstant;
 
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     static constexpr std::string_view shaderName = "reverse";
 };
 
@@ -1146,6 +1148,8 @@ class Tile : public ComputePipeline {
     DescriptorMap createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input,
                                       const std::shared_ptr<TensorDescriptor> &output) const;
 
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     static constexpr std::string_view shaderName = "tile";
 };
 
@@ -1173,6 +1177,8 @@ class Transpose : public ComputePipeline {
                                       const std::shared_ptr<TensorDescriptor> &output) const;
 
     PushConstant pushConstant;
+
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
 
     static constexpr std::string_view shaderName = "transpose";
 };

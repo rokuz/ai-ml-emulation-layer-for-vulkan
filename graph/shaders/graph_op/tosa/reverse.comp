@@ -17,17 +17,23 @@ layout(set = 0, binding = 0) uniform tensorARM<IN_OUT_T, RANK> outputData;
 layout(set = 1, binding = 0) uniform tensorARM<IN_OUT_T, RANK> inputData;
 
 void main() {
-    const uint axis = PUSH_UINT(0, axis);
-
-    uint[RANK] index;
-    getDispatchIndex(outputData, index);
-
     uint[RANK] shape;
-    getShape(shape, outputData);
+    getShape(shape, outputData)
+    uint[RANK] index;
+    getVectorIndex(index, shape)
 
-    IN_OUT_T value;
+    IN_OUT_T value[4];
     tensorReadARM(inputData, index, value);
 
-    index[axis] = shape[axis] - 1 - index[axis];
-    tensorWriteARM(outputData, index, value);
+    const uint axis = PUSH_UINT(0, axis);
+    if (axis + 1u == RANK) {
+        const uint base = index[RANK - 1];
+        for (uint k = 0; k < 4; k++) {
+            index[RANK - 1] = shape[RANK - 1] - 1u - (base + k);
+            tensorWriteARM(outputData, index, value[k]);
+        }
+    } else {
+        index[axis] = shape[axis] - 1u - index[axis];
+        tensorWriteARM(outputData, index, value);
+    }
 }
