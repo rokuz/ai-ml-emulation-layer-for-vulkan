@@ -1726,6 +1726,8 @@ SpirvBinary Pad::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCach
     return _pipelineCache->lookup(shaderName, {inOutType->glslType});
 }
 
+void Pad::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * Reduce
  *******************************************************************************/
@@ -2078,6 +2080,8 @@ SpirvBinary Slice::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCa
 
     return _pipelineCache->lookup(shaderName, {inOutType->glslType});
 }
+
+void Slice::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * Table
