@@ -616,6 +616,8 @@ class ElementwiseBinary : public ComputePipeline {
                                       const std::shared_ptr<TensorDescriptor> &input2,
                                       const std::shared_ptr<TensorDescriptor> &output) const;
 
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     PushConstant pushConstant;
     static constexpr std::string_view shaderName = "elementwise_binary";
 };
@@ -637,6 +639,8 @@ class ElementwiseUnary : public ComputePipeline {
   private:
     DescriptorMap createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input1,
                                       const std::shared_ptr<TensorDescriptor> &output) const;
+
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
 
     static constexpr std::string_view shaderName = "elementwise_unary";
 };
