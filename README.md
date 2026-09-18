@@ -301,6 +301,23 @@ Using **PowerShell**:
 $env:VMEL_DISABLE_CONV_TILES="1"
 ```
 
+The tiled int8 kernels convolve with `dotPacked4x8EXT` on devices that support
+`shaderIntegerDotProduct`, which the layer enables when the device has it. Set
+`VMEL_DISABLE_CONV_DOT` to convolve without the integer dot product, as on a
+device that lacks the feature.
+
+Using **shell**:
+
+```shell
+export VMEL_DISABLE_CONV_DOT=1
+```
+
+Using **PowerShell**:
+
+```powershell
+$env:VMEL_DISABLE_CONV_DOT="1"
+```
+
 ## Usage on Linux
 
 You can enable the graph and tensor layers using environment variables only,
