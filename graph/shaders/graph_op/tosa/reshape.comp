@@ -15,7 +15,7 @@ layout(set = 1, binding = 0) uniform tensorARM<IN_OUT_T, RANK_IN> inputData;
 
 void main() {
     uint[RANK_OUT] index;
-    getIndex(outputData, index);
+    getDispatchIndex(outputData, index);
 
     uint[RANK_IN] inputIndex;
     getIndex(inputData, inputIndex);

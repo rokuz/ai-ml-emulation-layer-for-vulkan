@@ -145,7 +145,7 @@ OUT_COMP_T applyMax(COMP_T a, COMP_T b, uint nanMode)
 
 void main() {
     uint[RANK_OUT] index;
-    getIndex(outputData, index);
+    getDispatchIndex(outputData, index);
 
     // Input 1 tensorARM
     uint[RANK_IN] inputShape1;

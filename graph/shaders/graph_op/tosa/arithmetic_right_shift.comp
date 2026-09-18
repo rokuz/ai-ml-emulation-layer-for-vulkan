@@ -21,7 +21,7 @@ layout(set = 2, binding = 0) uniform tensorARM<IN_OUT_T, RANK_IN> inputData2;
 
 void main() {
     uint[RANK_OUT] index;
-    getIndex(outputData, index);
+    getDispatchIndex(outputData, index);
 
     uint[RANK_IN] inputTensor1;
     getShape(inputTensor1, inputData1);
@@ -41,7 +41,7 @@ void main() {
     COMP_T signedValue = COMP_T(value1);
     COMP_T result = signedValue >> value2;
 
-    const bool round = pushConstants.round != 0;
+    const bool round = PUSH_UINT(0, round) != 0;
     if (round && value2 > 0) {
         if (((signedValue >> COMP_T(value2 - 1)) & 1) != 0) {
             result++;

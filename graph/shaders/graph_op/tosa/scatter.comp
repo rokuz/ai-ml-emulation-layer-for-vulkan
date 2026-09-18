@@ -15,7 +15,7 @@ layout(set = 3, binding = 0) uniform tensorARM<INDEX_T, 2> indicesData;    // [N
 
 void main() {
     uint[3] index;
-    getIndex3(outputData, index);
+    getDispatchIndex3(outputData, index);
 
     IN_OUT_T value;
     tensorReadARM(valuesData, index, value);

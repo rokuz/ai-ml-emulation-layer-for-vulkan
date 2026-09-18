@@ -30,6 +30,7 @@ struct SpecializationConstantsView {
     const void *data = nullptr;
     uint32_t sizeBytes = 0;
     uint32_t entryCount = 0;
+    const uint32_t *constantIds = nullptr;
 };
 
 inline SpecializationConstantsView makeSpecializationConstantsView(const std::vector<uint32_t> &constants) {
@@ -41,7 +42,8 @@ inline SpecializationConstantsView makeSpecializationConstantsView(const void *d
     return {data, sizeBytes, static_cast<uint32_t>(sizeBytes / sizeof(uint32_t))};
 }
 
-std::vector<VkSpecializationMapEntry> makeSpecializationMapEntries(uint32_t entryCount);
+std::vector<VkSpecializationMapEntry> makeSpecializationMapEntries(uint32_t entryCount,
+                                                                   const uint32_t *constantIds = nullptr);
 
 VkShaderModule createShaderModule(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> &loader,
                                   VkDevice device, const SpirvBinary &code,

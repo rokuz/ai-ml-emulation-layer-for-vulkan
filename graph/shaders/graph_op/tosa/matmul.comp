@@ -28,8 +28,11 @@ layout(set = 1, binding = 0) uniform tensorARM<IN_T, 3> inputData1;    // [N, H,
 layout(set = 2, binding = 0) uniform tensorARM<IN_T, 3> inputData2;    // [N, C, W]
 
 void main() {
+    const int inputZeroPoint1 = PUSH_INT(0, inputZeroPoint1);
+    const int inputZeroPoint2 = PUSH_INT(1, inputZeroPoint2);
+
     uint[3] index;
-    getIndex3(outputData, index);
+    getDispatchIndex3(outputData, index);
 
     uint on = index[0];
     uint oy = index[1];
@@ -52,8 +55,8 @@ void main() {
         IN_T value2[4] = {value20, value21, value22, value23};
 
         for (uint idx = 0; idx < 4; ++idx) {
-            COMP_T val1 = DECODE_STORAGE_TO_COMP(value1[idx], TYPE_IN, COMP_T) - COMP_T(pushConstants.inputZeroPoint1);
-            COMP_T val2 = DECODE_STORAGE_TO_COMP(value2[idx], TYPE_IN, COMP_T) - COMP_T(pushConstants.inputZeroPoint2);
+            COMP_T val1 = DECODE_STORAGE_TO_COMP(value1[idx], TYPE_IN, COMP_T) - COMP_T(inputZeroPoint1);
+            COMP_T val2 = DECODE_STORAGE_TO_COMP(value2[idx], TYPE_IN, COMP_T) - COMP_T(inputZeroPoint2);
             acc += val1 * val2;
         }
     }
@@ -63,8 +66,8 @@ void main() {
         tensorReadARM(inputData1, uint[](on, oy, c), v1);
         tensorReadARM(inputData2, uint[](on, c, ox), v2);
 
-        COMP_T val1 = DECODE_STORAGE_TO_COMP(v1, TYPE_IN, COMP_T) - COMP_T(pushConstants.inputZeroPoint1);
-        COMP_T val2 = DECODE_STORAGE_TO_COMP(v2, TYPE_IN, COMP_T) - COMP_T(pushConstants.inputZeroPoint2);
+        COMP_T val1 = DECODE_STORAGE_TO_COMP(v1, TYPE_IN, COMP_T) - COMP_T(inputZeroPoint1);
+        COMP_T val2 = DECODE_STORAGE_TO_COMP(v2, TYPE_IN, COMP_T) - COMP_T(inputZeroPoint2);
         acc += val1 * val2;
     }
 
