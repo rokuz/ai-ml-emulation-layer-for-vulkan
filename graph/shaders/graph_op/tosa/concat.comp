@@ -18,8 +18,12 @@ layout(set = 0, binding = 0) uniform tensorARM<IN_OUT_T, RANK> outputData;
 layout(set = 1, binding = 0) uniform tensorARM<IN_OUT_T, RANK> inputData;
 
 void main() {
+    uint[RANK] shape;
+    getShape(shape, inputData)
     uint[RANK] index;
-    getDispatchIndex(inputData, index);
+    getVectorIndex(index, shape)
+
+    const uint lastDim = shape[RANK - 1];
 
     uint[RANK] outputIndex;
     for (uint i = 0; i < outputIndex.length(); i++) {
@@ -28,7 +32,17 @@ void main() {
 
     outputIndex[PUSH_UINT(0, axis)] += PUSH_UINT(1, offset);
 
-    IN_OUT_T value;
-    tensorReadARM(inputData, index, value);
-    tensorWriteARM(outputData, outputIndex, value);
+    if (lastDim - index[RANK - 1] >= 4u) {
+        IN_OUT_T value[4];
+        tensorReadARM(inputData, index, value);
+        tensorWriteARM(outputData, outputIndex, value);
+    } else {
+        for (uint k = index[RANK - 1]; k < lastDim; k++) {
+            IN_OUT_T value;
+            tensorReadARM(inputData, index, value);
+            tensorWriteARM(outputData, outputIndex, value);
+            index[RANK - 1] += 1u;
+            outputIndex[RANK - 1] += 1u;
+        }
+    }
 }
