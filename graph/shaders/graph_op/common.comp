@@ -6,6 +6,7 @@
 #version 460
 #extension GL_EXT_shader_explicit_arithmetic_types : enable
 #extension GL_ARM_tensors : enable
+#extension GL_EXT_integer_dot_product : enable
 
 // Maximum supported rank
 #define RANK_MAX 6
