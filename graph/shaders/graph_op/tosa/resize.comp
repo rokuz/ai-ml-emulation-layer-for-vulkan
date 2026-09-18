@@ -51,6 +51,7 @@ int idivFloor(int numerator, int denominator) {
 }
 
 void main() {
+#if IS_FLOAT(TYPE_OUT) || IS_BFLOAT(TYPE_OUT)
     uint[4] index;
     getIndex4(outputData, index);
 
@@ -70,13 +71,8 @@ void main() {
         tensorSizeARM(inputData, 3)
     };
 
-#if IS_FLOAT(TYPE_OUT) || IS_BFLOAT(TYPE_OUT)
     COMP_T unit_y = COMP_T(1.0);
     COMP_T unit_x = COMP_T(1.0);
-#else
-    int16_t unit_y = int16_t(pushConstants.scale.y.n);
-    int16_t unit_x = int16_t(pushConstants.scale.x.n);
-#endif
 
     int32_t y = int32_t(oy * pushConstants.scale.y.d + pushConstants.offset.y);
     int16_t iy = int16_t(idivFloor(y, pushConstants.scale.y.n));
@@ -86,13 +82,8 @@ void main() {
     int16_t ix = int16_t(idivFloor(x, pushConstants.scale.x.n));
     int16_t rx = int16_t(x - ix * pushConstants.scale.x.n);
 
-#if IS_FLOAT(TYPE_OUT) || IS_BFLOAT(TYPE_OUT)
     COMP_T dy = COMP_T(ry) / COMP_T(pushConstants.scale.y.n);
     COMP_T dx = COMP_T(rx) / COMP_T(pushConstants.scale.x.n);
-#else
-    int16_t dy = ry;
-    int16_t dx = rx;
-#endif
 
     int16_t iy0 = int16_t(max(iy, 0));
     int16_t iy1 = int16_t(min(iy + 1, inputShape[1] - 1));
@@ -117,13 +108,8 @@ void main() {
         acc += DECODE_STORAGE_TO_COMP(v10, TYPE_IN, COMP_T) * COMP_T(dy) * COMP_T(unit_x - dx);
         acc += DECODE_STORAGE_TO_COMP(v11, TYPE_IN, COMP_T) * COMP_T(dy) * COMP_T(dx);
     } else if (pushConstants.mode == NEAREST) {
-#if IS_FLOAT(TYPE_OUT) || IS_BFLOAT(TYPE_OUT)
         int32_t iy = (dy >= 0.5) ? iy1 : iy0;
         int32_t ix = (dx >= 0.5) ? ix1 : ix0;
-#else
-        int32_t iy = (2 * dy >= pushConstants.scale.y.n) ? iy1 : iy0;
-        int32_t ix = (2 * dx >= pushConstants.scale.x.n) ? ix1 : ix0;
-#endif
 
         IN_T value;
         tensorReadARM(inputData, uint[](n, iy, ix, c), value);
@@ -133,5 +119,86 @@ void main() {
 
     OUT_T outputValue = ENCODE_COMP_TO_STORAGE(acc, OUT_T, TYPE_OUT);
 
-    tensorWriteARM(outputData, uint[](n, oy, ox, c), outputValue);
+    tensorWriteARM(outputData, index, outputValue);
+#else
+    const int scaleYN = PUSH_INT(0, scale.y.n);
+    const int scaleXN = PUSH_INT(2, scale.x.n);
+    const uint mode = PUSH_UINT(8, mode);
+
+    uint[4] shape = uint[](tensorSizeARM(outputData, 0), tensorSizeARM(outputData, 1),
+                          tensorSizeARM(outputData, 2), tensorSizeARM(outputData, 3));
+    uint[4] index;
+    getVectorIndex(index, shape)
+
+    const uint n = index[0];
+    const uint oy = index[1];
+    const uint ox = index[2];
+    const uint c = index[3];
+
+    COMP_T acc[4] = COMP_T[4](COMP_T(0), COMP_T(0), COMP_T(0), COMP_T(0));
+
+    uint[4] inputShape = {
+        tensorSizeARM(inputData, 0),
+        tensorSizeARM(inputData, 1),
+        tensorSizeARM(inputData, 2),
+        tensorSizeARM(inputData, 3)
+    };
+
+    int16_t unit_y = int16_t(scaleYN);
+    int16_t unit_x = int16_t(scaleXN);
+
+    int32_t y = int32_t(oy * PUSH_INT(1, scale.y.d) + PUSH_INT(4, offset.y));
+    int16_t iy = int16_t(idivFloor(y, scaleYN));
+    int16_t ry = int16_t(y - iy * scaleYN);
+
+    int32_t x = int32_t(ox * PUSH_INT(3, scale.x.d) + PUSH_INT(5, offset.x));
+    int16_t ix = int16_t(idivFloor(x, scaleXN));
+    int16_t rx = int16_t(x - ix * scaleXN);
+
+    int16_t dy = ry;
+    int16_t dx = rx;
+
+    int16_t iy0 = int16_t(max(iy, 0));
+    int16_t iy1 = int16_t(min(iy + 1, inputShape[1] - 1));
+    int16_t ix0 = int16_t(max(ix, 0));
+    int16_t ix1 = int16_t(min(ix + 1, inputShape[2] - 1));
+
+    if (mode == BILINEAR) {
+        IN_T v00[4];
+        tensorReadARM(inputData, uint[](n, iy0, ix0, c), v00);
+
+        IN_T v01[4];
+        tensorReadARM(inputData, uint[](n, iy0, ix1, c), v01);
+
+        IN_T v10[4];
+        tensorReadARM(inputData, uint[](n, iy1, ix0, c), v10);
+
+        IN_T v11[4];
+        tensorReadARM(inputData, uint[](n, iy1, ix1, c), v11);
+
+        for (uint k = 0; k < 4; k++) {
+            acc[k]  = DECODE_STORAGE_TO_COMP(v00[k], TYPE_IN, COMP_T) * COMP_T(unit_y - dy) * COMP_T(unit_x - dx);
+            acc[k] += DECODE_STORAGE_TO_COMP(v01[k], TYPE_IN, COMP_T) * COMP_T(unit_y - dy) * COMP_T(dx);
+            acc[k] += DECODE_STORAGE_TO_COMP(v10[k], TYPE_IN, COMP_T) * COMP_T(dy) * COMP_T(unit_x - dx);
+            acc[k] += DECODE_STORAGE_TO_COMP(v11[k], TYPE_IN, COMP_T) * COMP_T(dy) * COMP_T(dx);
+        }
+    } else if (mode == NEAREST) {
+        int32_t iy = (2 * dy >= scaleYN) ? iy1 : iy0;
+        int32_t ix = (2 * dx >= scaleXN) ? ix1 : ix0;
+
+        IN_T value[4];
+        tensorReadARM(inputData, uint[](n, iy, ix, c), value);
+
+        for (uint k = 0; k < 4; k++) {
+            acc[k] = DECODE_STORAGE_TO_COMP(value[k], TYPE_IN, COMP_T);
+        }
+    }
+
+    OUT_T outputValue[4];
+    for (uint k = 0; k < 4; k++) {
+        outputValue[k] = ENCODE_COMP_TO_STORAGE(acc[k], OUT_T, TYPE_OUT);
+    }
+
+    tensorWriteARM(outputData, index, outputValue);
+#endif
 }
