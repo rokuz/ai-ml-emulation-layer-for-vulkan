@@ -16,7 +16,7 @@ layout(set = 3, binding = 0) uniform tensorARM<float, 3> inputImagData;
 
 void main() {
     uint[3] index;
-    getIndex3(outputRealData, index);
+    getDispatchIndex3(outputRealData, index);
 
     const uint[3] shape = {
         tensorSizeARM(outputRealData, 0),

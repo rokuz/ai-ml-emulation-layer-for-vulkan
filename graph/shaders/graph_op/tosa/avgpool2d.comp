@@ -26,7 +26,7 @@ layout(set = 1, binding = 0) uniform tensorARM<STORAGE_T, 4> inputData;
 
 void main() {
     uint[4] index;
-    getIndex4(outputData, index);
+    getDispatchIndex4(outputData, index);
 
     uint on = index[0];
     uint oy = index[1];
@@ -36,11 +36,11 @@ void main() {
     ACC_T acc = ACC_T(0);
     uint32_t count = uint32_t(0);
 
-    uint iy = oy * pushConstants.stride[0] - pushConstants.pad[0];
-    uint ix = ox * pushConstants.stride[1] - pushConstants.pad[2];
+    uint iy = oy * PUSH_INT(2, stride[0]) - PUSH_INT(4, pad[0]);
+    uint ix = ox * PUSH_INT(3, stride[1]) - PUSH_INT(6, pad[2]);
 
-    for (uint ky = 0; ky < pushConstants.kernel[0]; ky++) {
-        for (uint kx = 0; kx < pushConstants.kernel[1]; kx++) {
+    for (uint ky = 0; ky < PUSH_INT(0, kernel[0]); ky++) {
+        for (uint kx = 0; kx < PUSH_INT(1, kernel[1]); kx++) {
             uint y = iy + ky;
             uint x = ix + kx;
 
@@ -51,7 +51,7 @@ void main() {
 
                 IN_OUT_T value = DECODE_STORAGE_TO_COMP(valueRaw, TYPE_IN_OUT, IN_OUT_T);
 
-                acc += ACC_T(value) - ACC_T(pushConstants.inputZeroPoint);
+                acc += ACC_T(value) - ACC_T(PUSH_INT(8, inputZeroPoint));
                 count++;
             }
         }
@@ -65,7 +65,7 @@ void main() {
     acc = (acc + round) / ACC_T(count);
 
     // Add output zero point
-    acc += ACC_T(pushConstants.outputZeroPoint);
+    acc += ACC_T(PUSH_INT(9, outputZeroPoint));
 
     // Clamp to output range
     acc = clamp(acc, MIN, MAX);

@@ -22,7 +22,7 @@ layout(set = 1, binding = 0) uniform tensorARM<STORAGE_T, 4> inputData;
 
 void main() {
     uint[4] index;
-    getIndex4(outputData, index);
+    getDispatchIndex4(outputData, index);
 
     IN_OUT_T acc = IN_OUT_T(%in_out_t_lowest%);
     uint on = index[0];
@@ -31,13 +31,13 @@ void main() {
     uint oc = index[3];
 
     // Keep math in signed domain for signed push constants and cast only after bounds checks.
-    int kernelY = max(pushConstants.kernel[0], 0);
-    int kernelX = max(pushConstants.kernel[1], 0);
-    int strideY = max(pushConstants.stride[0], 1);
-    int strideX = max(pushConstants.stride[1], 1);
+    int kernelY = max(PUSH_INT(0, kernel[0]), 0);
+    int kernelX = max(PUSH_INT(1, kernel[1]), 0);
+    int strideY = max(PUSH_INT(2, stride[0]), 1);
+    int strideX = max(PUSH_INT(3, stride[1]), 1);
 
-    int iy = int(oy) * strideY - pushConstants.pad[0];
-    int ix = int(ox) * strideX - pushConstants.pad[2];
+    int iy = int(oy) * strideY - PUSH_INT(4, pad[0]);
+    int ix = int(ox) * strideX - PUSH_INT(6, pad[2]);
 
     for (int ky = 0; ky < kernelY; ++ky) {
         for (int kx = 0; kx < kernelX; ++kx) {
@@ -52,7 +52,7 @@ void main() {
 
 #if IS_FLOAT(TYPE_IN_OUT) || IS_REDUCED_FLOAT(TYPE_IN_OUT)
                 if (isnan(value)) {
-                    if (pushConstants.nanMode == NAN_MODE_IGNORE) {
+                    if (PUSH_UINT(8, nanMode) == NAN_MODE_IGNORE) {
                         // Ignore value and continue
                         continue;
                     }

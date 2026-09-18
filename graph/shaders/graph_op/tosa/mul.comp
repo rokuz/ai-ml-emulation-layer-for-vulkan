@@ -23,7 +23,7 @@ layout(set = 2, binding = 0) uniform tensorARM<IN_T, RANK_IN> inputData2;
 
 void main() {
     uint[RANK_OUT] index;
-    getIndex(outputData, index);
+    getDispatchIndex(outputData, index);
 
     uint[RANK_IN] inputShape1;
     uint[RANK_IN] inputIndex1;
@@ -48,10 +48,12 @@ void main() {
 #elif IS_FLOAT(TYPE_IN)
     OUT_T result = OUT_T(value1) * OUT_T(value2);
 #else
+    const uint shift = PUSH_UINT(0, shift);
+
     int64_t result = int64_t(value1) * int64_t(value2);
 
-    if (pushConstants.shift > 0) {
-        result = (result + (int64_t(1) << (pushConstants.shift - 1))) >> pushConstants.shift;
+    if (shift > 0) {
+        result = (result + (int64_t(1) << (shift - 1))) >> shift;
     }
 #endif
 

@@ -21,7 +21,7 @@ layout(set = 1, binding = 0) uniform tensorARM<IN_T, RANK> inputData;
 
 void main() {
     uint[RANK] index;
-    getIndex(outputData, index);
+    getDispatchIndex(outputData, index);
 
     IN_T value;
     tensorReadARM(inputData, index, value);

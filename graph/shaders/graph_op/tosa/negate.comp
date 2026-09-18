@@ -29,13 +29,13 @@ layout(set = 1, binding = 0) uniform tensorARM<STORAGE_T, RANK> inputData;
 
 void main() {
     uint[RANK] index;
-    getIndex(outputData, index);
+    getDispatchIndex(outputData, index);
 
     STORAGE_T valueRaw;
     tensorReadARM(inputData, index, valueRaw);
 
     COMP_T value = DECODE_STORAGE_TO_COMP(valueRaw, TYPE_IN_OUT, COMP_T);
-    COMP_T res = COMP_T(pushConstants.inputZeroPoint) - value + COMP_T(pushConstants.outputZeroPoint);
+    COMP_T res = COMP_T(PUSH_INT(0, inputZeroPoint)) - value + COMP_T(PUSH_INT(1, outputZeroPoint));
 
 #if IS_BFLOAT(TYPE_IN_OUT)
     COMP_T outValue = isnan(float(value)) ? value : (isinf(float(value)) ? COMP_T(-value) : res);

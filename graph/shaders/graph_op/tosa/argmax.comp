@@ -22,15 +22,17 @@ layout(set = 0, binding = 0) uniform tensorARM<int32_t, RANK_OUT> outputData;
 layout(set = 1, binding = 0) uniform tensorARM<IN_T, RANK_IN> inputData;
 
 void main() {
+    const uint axis = PUSH_UINT(0, axis);
+
     uint[RANK_OUT] index;
-    getIndex(outputData, index);
+    getDispatchIndex(outputData, index);
 
     uint[RANK_IN] inputIndex;
-    for (uint i = 0; i < pushConstants.axis; i++) {
+    for (uint i = 0; i < axis; i++) {
         inputIndex[i] = index[i];
     }
 
-    for (uint i = pushConstants.axis; i < RANK_OUT; i++) {
+    for (uint i = axis; i < RANK_OUT; i++) {
         inputIndex[i + 1] = index[i];
     }
 
@@ -40,8 +42,8 @@ void main() {
     uint[RANK_IN] inputShape;
     getShape(inputShape, inputData);
 
-    for (int32_t i = 0; i < inputShape[pushConstants.axis]; i++) {
-        inputIndex[pushConstants.axis] = i;
+    for (int32_t i = 0; i < inputShape[axis]; i++) {
+        inputIndex[axis] = i;
         IN_T valueRaw;
         tensorReadARM(inputData, inputIndex, valueRaw);
 
@@ -49,7 +51,7 @@ void main() {
 
         #if IS_FLOAT(TYPE_IN) || IS_REDUCED_FLOAT(TYPE_IN)
         if (isnan(value)) {
-            if (pushConstants.nanMode == NAN_MODE_IGNORE) {
+            if (PUSH_UINT(1, nanMode) == NAN_MODE_IGNORE) {
                 continue;
             }
             maxIndex = i;

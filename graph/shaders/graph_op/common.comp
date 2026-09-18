@@ -182,6 +182,99 @@
         offsetToIndex(shape, offset, index);                                                                           \
     }
 
+layout(constant_id = 199) const int PUSH_WORDS_VALID = 0;
+layout(constant_id = 200) const int PUSH_WORD_0 = 0;
+layout(constant_id = 201) const int PUSH_WORD_1 = 0;
+layout(constant_id = 202) const int PUSH_WORD_2 = 0;
+layout(constant_id = 203) const int PUSH_WORD_3 = 0;
+layout(constant_id = 204) const int PUSH_WORD_4 = 0;
+layout(constant_id = 205) const int PUSH_WORD_5 = 0;
+layout(constant_id = 206) const int PUSH_WORD_6 = 0;
+layout(constant_id = 207) const int PUSH_WORD_7 = 0;
+layout(constant_id = 208) const int PUSH_WORD_8 = 0;
+layout(constant_id = 209) const int PUSH_WORD_9 = 0;
+layout(constant_id = 210) const int PUSH_WORD_10 = 0;
+layout(constant_id = 211) const int PUSH_WORD_11 = 0;
+layout(constant_id = 212) const int PUSH_WORD_12 = 0;
+layout(constant_id = 213) const int PUSH_WORD_13 = 0;
+layout(constant_id = 214) const int PUSH_WORD_14 = 0;
+layout(constant_id = 215) const int PUSH_WORD_15 = 0;
+
+#define PUSH_INT(word, field) (PUSH_WORDS_VALID != 0 ? PUSH_WORD_##word : pushConstants.field)
+#define PUSH_UINT(word, field) (PUSH_WORDS_VALID != 0 ? uint(PUSH_WORD_##word) : pushConstants.field)
+#define PUSH_UINT6(field, i)                                                                                           \
+    (PUSH_WORDS_VALID != 0 ? uint[6](uint(PUSH_WORD_0), uint(PUSH_WORD_1), uint(PUSH_WORD_2), uint(PUSH_WORD_3),      \
+                                     uint(PUSH_WORD_4), uint(PUSH_WORD_5))[i]                                          \
+                           : pushConstants.field[i])
+
+layout(constant_id = 100) const uint DISPATCH_RANK = 0;
+layout(constant_id = 101) const uint DISPATCH_SHAPE_0 = 1;
+layout(constant_id = 102) const uint DISPATCH_SHAPE_1 = 1;
+layout(constant_id = 103) const uint DISPATCH_SHAPE_2 = 1;
+layout(constant_id = 104) const uint DISPATCH_SHAPE_3 = 1;
+layout(constant_id = 105) const uint DISPATCH_SHAPE_4 = 1;
+layout(constant_id = 106) const uint DISPATCH_SHAPE_5 = 1;
+
+#define decodeDispatchIndex(index)                                                                                     \
+    {                                                                                                                  \
+        const uint dispatchShape[6] = uint[](DISPATCH_SHAPE_0, DISPATCH_SHAPE_1, DISPATCH_SHAPE_2, DISPATCH_SHAPE_3,   \
+                                             DISPATCH_SHAPE_4, DISPATCH_SHAPE_5);                                      \
+        uint dispatchOffset =                                                                                          \
+            gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x;               \
+        for (int dispatchDim = int(index.length()) - 1; dispatchDim >= 0; dispatchDim--) {                             \
+            index[dispatchDim] = dispatchOffset % dispatchShape[dispatchDim];                                          \
+            dispatchOffset /= dispatchShape[dispatchDim];                                                              \
+        }                                                                                                              \
+        if (dispatchOffset > 0) {                                                                                      \
+            return;                                                                                                    \
+        }                                                                                                              \
+    }
+
+#define getDispatchIndex(tensorARM, index)                                                                             \
+    {                                                                                                                  \
+        if (DISPATCH_RANK == uint(index.length())) {                                                                   \
+            decodeDispatchIndex(index)                                                                                 \
+        } else {                                                                                                       \
+            getIndex(tensorARM, index)                                                                                 \
+        }                                                                                                              \
+    }
+
+#define getDispatchIndex2(tensorARM, index)                                                                            \
+    {                                                                                                                  \
+        if (DISPATCH_RANK == uint(index.length())) {                                                                   \
+            decodeDispatchIndex(index)                                                                                 \
+        } else {                                                                                                       \
+            getIndex2(tensorARM, index)                                                                                \
+        }                                                                                                              \
+    }
+
+#define getDispatchIndex3(tensorARM, index)                                                                            \
+    {                                                                                                                  \
+        if (DISPATCH_RANK == uint(index.length())) {                                                                   \
+            decodeDispatchIndex(index)                                                                                 \
+        } else {                                                                                                       \
+            getIndex3(tensorARM, index)                                                                                \
+        }                                                                                                              \
+    }
+
+#define getDispatchIndex4(tensorARM, index)                                                                            \
+    {                                                                                                                  \
+        if (DISPATCH_RANK == uint(index.length())) {                                                                   \
+            decodeDispatchIndex(index)                                                                                 \
+        } else {                                                                                                       \
+            getIndex4(tensorARM, index)                                                                                \
+        }                                                                                                              \
+    }
+
+#define getDispatchIndex5(tensorARM, index)                                                                            \
+    {                                                                                                                  \
+        if (DISPATCH_RANK == uint(index.length())) {                                                                   \
+            decodeDispatchIndex(index)                                                                                 \
+        } else {                                                                                                       \
+            getIndex5(tensorARM, index)                                                                                \
+        }                                                                                                              \
+    }
+
 // BF16 <-> FP32 conversions (bf16 stored as the top 16 bits of IEEE754 fp32)
 float decode_to_f32(bfloat16_t x)
 {

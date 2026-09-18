@@ -242,6 +242,26 @@ Graph profiling requires a queue family with non-zero `timestampValidBits`.
 When the selected Vulkan® driver does not expose timestamp queries, graph
 execution remains available but no timestamp samples can be collected.
 
+The pipeline of every operator is specialized on the shape of the tensor its
+dispatch is sized for and on the values of its push constants, so that the
+index decoding and the operator attributes fold into constants when the
+pipeline is created. A pipeline is then compiled once per operator instance
+rather than once per operator, which costs graph creation time. Set
+`VMEL_DISABLE_SPECIALIZATION` to compile one pipeline per operator and read the
+attributes from the push constants at run time.
+
+Using **shell**:
+
+```shell
+export VMEL_DISABLE_SPECIALIZATION=1
+```
+
+Using **PowerShell**:
+
+```powershell
+$env:VMEL_DISABLE_SPECIALIZATION="1"
+```
+
 ## Usage on Linux
 
 You can enable the graph and tensor layers using environment variables only,

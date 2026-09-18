@@ -47,7 +47,7 @@ int32_t applyScale(int64_t value, int32_t multiplier, int8_t shift, bool doubleR
 
 void main() {
     uint[RANK] index;
-    getIndex(outputData, index);
+    getDispatchIndex(outputData, index);
 
     const bool scale32 = SCALE32 != 0;
     const bool doubleRound = DOUBLE_ROUND != 0;
@@ -56,7 +56,7 @@ void main() {
 
     IN_T val;
     tensorReadARM(inputData, index, val);
-    int64_t value = int64_t(val) - int64_t(IN_T(pushConstants.inputZeroPoint));
+    int64_t value = int64_t(val) - int64_t(IN_T(PUSH_INT(0, inputZeroPoint)));
 
     MUL_T mulVal;
     tensorReadARM(multiplier, uint[1](c), mulVal);
@@ -65,7 +65,7 @@ void main() {
     tensorReadARM(shiftData, uint[1](c), shiftVal);
 
     int32_t result = applyScale(value, int32_t(mulVal), shiftVal, scale32 && doubleRound);
-    result += OUT_T(pushConstants.outputZeroPoint);
+    result += OUT_T(PUSH_INT(1, outputZeroPoint));
     result = int32_t(clamp(result, OUT_T(%out_t_lowest%), OUT_T(%out_t_max%)));
 
     tensorWriteARM(outputData, index, OUT_T(result));
