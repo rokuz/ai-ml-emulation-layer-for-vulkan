@@ -2045,6 +2045,8 @@ SpirvBinary Reshape::createSpirv(const std::shared_ptr<PipelineCache> &_pipeline
                                   });
 }
 
+void Reshape::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * Resize
  *******************************************************************************/
