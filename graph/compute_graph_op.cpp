@@ -2319,6 +2319,8 @@ SpirvBinary Table::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCa
                                   });
 }
 
+void Table::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * Tile
  *******************************************************************************/

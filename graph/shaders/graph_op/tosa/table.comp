@@ -37,16 +37,18 @@ int32_t lookup(int16_t value) {
 }
 
 void main() {
+    uint[RANK] shape;
+    getShape(shape, outputData)
     uint[RANK] index;
-    getDispatchIndex(outputData, index);
+    getVectorIndex(index, shape)
 
-    IN_T value;
+    IN_T value[4];
     tensorReadARM(inputData, index, value);
 
-#ifdef EXPERIMENTAL_MOLTEN_VK_SUPPORT
-    OUT_T outValue = OUT_T(lookup(value));
+    OUT_T outValue[4];
+    for (uint k = 0; k < 4; k++) {
+        outValue[k] = OUT_T(lookup(value[k]));
+    }
+
     tensorWriteARM(outputData, index, outValue);
-#else
-    tensorWriteARM(outputData, index, OUT_T(lookup(value)));
-#endif
 }
