@@ -954,15 +954,7 @@ DescriptorMap Concat::createDescriptorMap(const std::shared_ptr<TensorDescriptor
     return descriptorMap;
 }
 
-void Concat::cmdDispatch(VkCommandBuffer commandBuffer) {
-    const auto &tensor = pipelineLayout->getTensorForSet(1);
-    const auto &size = uint32_t(tensor->getShapeSize());
-
-    const auto groupCountX = static_cast<uint32_t>(std::ceil(std::sqrt(double(divideRoundUp(size, warp1D)))));
-    const auto groupCountY = groupCountX;
-
-    loader->vkCmdDispatch(commandBuffer, groupCountX, groupCountY, 1);
-}
+void Concat::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 1, 4); }
 
 SpirvBinary Concat::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCache,
                                 const std::shared_ptr<TensorDescriptor> &output) const {
