@@ -1312,6 +1312,8 @@ SpirvBinary DepthwiseConv2D::createSpirv(const std::shared_ptr<PipelineCache> &_
     return _pipelineCache->lookup(shaderName, keys);
 }
 
+void DepthwiseConv2D::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * ElementwiseBinary
  *******************************************************************************/
