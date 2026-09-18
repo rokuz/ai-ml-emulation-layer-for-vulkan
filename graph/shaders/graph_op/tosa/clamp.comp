@@ -22,13 +22,14 @@ layout(set = 1, binding = 0) uniform tensorARM<STORAGE_T, RANK> inputData;
 #define COMP_T %in_out_t_comp%
 
 void main() {
+    uint[RANK] shape;
+    getShape(shape, outputData)
     uint[RANK] index;
-    getDispatchIndex(outputData, index);
+    getVectorIndex(index, shape)
 
-    STORAGE_T valueRaw;
+    STORAGE_T valueRaw[4];
     tensorReadARM(inputData, index, valueRaw);
 
-    COMP_T value = DECODE_STORAGE_TO_COMP(valueRaw, TYPE_IN_OUT, COMP_T);
     COMP_T minValue = COMP_T(pushConstants.min);
     COMP_T maxValue = COMP_T(pushConstants.max);
 
@@ -39,15 +40,22 @@ void main() {
     }
 #endif
 
-#if IS_FLOAT(TYPE_IN_OUT) || IS_BFLOAT(TYPE_IN_OUT)
-    if (isnan(value) && (pushConstants.nanMode == NAN_MODE_IGNORE)) {
-        value = minValue;
-    }
+    STORAGE_T outStorage[4];
+    for (uint k = 0; k < 4; k++) {
+        COMP_T value = DECODE_STORAGE_TO_COMP(valueRaw[k], TYPE_IN_OUT, COMP_T);
 
-    value = isnan(float(value)) ? value : clamp(value, minValue, maxValue);
+#if IS_FLOAT(TYPE_IN_OUT) || IS_BFLOAT(TYPE_IN_OUT)
+        if (isnan(value) && (pushConstants.nanMode == NAN_MODE_IGNORE)) {
+            value = minValue;
+        }
+
+        value = isnan(float(value)) ? value : clamp(value, minValue, maxValue);
 #else
-    value = clamp(value, minValue, maxValue);
+        value = clamp(value, minValue, maxValue);
 #endif
 
-    tensorWriteARM(outputData, index, ENCODE_COMP_TO_STORAGE(value, STORAGE_T, TYPE_IN_OUT));
+        outStorage[k] = ENCODE_COMP_TO_STORAGE(value, STORAGE_T, TYPE_IN_OUT);
+    }
+
+    tensorWriteARM(outputData, index, outStorage);
 }

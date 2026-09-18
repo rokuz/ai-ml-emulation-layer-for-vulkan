@@ -877,6 +877,8 @@ SpirvBinary Cast::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCac
                                   });
 }
 
+void Cast::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * Clamp
  *******************************************************************************/
@@ -924,6 +926,8 @@ SpirvBinary Clamp::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCa
                                       {"%in_out_t_comp%", inOutType->compType},
                                   });
 }
+
+void Clamp::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * Concat
@@ -1816,6 +1820,8 @@ SpirvBinary Negate::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
                                       {"%in_out_t_max%", inOutType->max},
                                   });
 }
+
+void Negate::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * Pad

@@ -20,11 +20,17 @@ layout(set = 0, binding = 0) uniform tensorARM<OUT_T, RANK> outputData;
 layout(set = 1, binding = 0) uniform tensorARM<IN_T, RANK> inputData;
 
 void main() {
+    uint[RANK] shape;
+    getShape(shape, outputData)
     uint[RANK] index;
-    getDispatchIndex(outputData, index);
+    getVectorIndex(index, shape)
 
-    IN_T value;
-    tensorReadARM(inputData, index, value);
+    IN_T valueGroup[4];
+    tensorReadARM(inputData, index, valueGroup);
+
+    OUT_T outValues[4];
+    for (uint k = 0; k < 4; k++) {
+    IN_T value = valueGroup[k];
 
 #if IS_BOOL(TYPE_OUT)
     #if IS_FLOAT8(TYPE_IN)
@@ -99,5 +105,8 @@ void main() {
     #endif
 #endif
 
-    tensorWriteARM(outputData, index, outValue);
+    outValues[k] = outValue;
+    }
+
+    tensorWriteARM(outputData, index, outValues);
 }
