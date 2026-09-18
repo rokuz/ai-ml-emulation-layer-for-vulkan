@@ -1343,6 +1343,8 @@ SpirvBinary ElementwiseBinary::createSpirv(const std::shared_ptr<PipelineCache> 
     return _pipelineCache->lookup(shaderName, {name, inType->glslType, outType->glslType});
 }
 
+void ElementwiseBinary::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * ElementwiseUnary
  *******************************************************************************/
@@ -1371,6 +1373,8 @@ SpirvBinary ElementwiseUnary::createSpirv(const std::shared_ptr<PipelineCache> &
 
     return _pipelineCache->lookup(shaderName, {name, inOutType->glslType});
 }
+
+void ElementwiseUnary::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * Fft2D
