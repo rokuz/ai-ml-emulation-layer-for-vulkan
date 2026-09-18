@@ -28,21 +28,28 @@ layout(set = 0, binding = 0) uniform tensorARM<STORAGE_T, RANK> outputData;
 layout(set = 1, binding = 0) uniform tensorARM<STORAGE_T, RANK> inputData;
 
 void main() {
+    uint[RANK] shape;
+    getShape(shape, outputData)
     uint[RANK] index;
-    getDispatchIndex(outputData, index);
+    getVectorIndex(index, shape)
 
-    STORAGE_T valueRaw;
+    STORAGE_T valueRaw[4];
     tensorReadARM(inputData, index, valueRaw);
 
-    COMP_T value = DECODE_STORAGE_TO_COMP(valueRaw, TYPE_IN_OUT, COMP_T);
-    COMP_T res = COMP_T(PUSH_INT(0, inputZeroPoint)) - value + COMP_T(PUSH_INT(1, outputZeroPoint));
+    STORAGE_T outStorage[4];
+    for (uint k = 0; k < 4; k++) {
+        COMP_T value = DECODE_STORAGE_TO_COMP(valueRaw[k], TYPE_IN_OUT, COMP_T);
+        COMP_T res = COMP_T(PUSH_INT(0, inputZeroPoint)) - value + COMP_T(PUSH_INT(1, outputZeroPoint));
 
 #if IS_BFLOAT(TYPE_IN_OUT)
-    COMP_T outValue = isnan(float(value)) ? value : (isinf(float(value)) ? COMP_T(-value) : res);
+        COMP_T outValue = isnan(float(value)) ? value : (isinf(float(value)) ? COMP_T(-value) : res);
 #else
-    COMP_T outValue =
-        isnan(float(value)) ? value : (isinf(float(value)) ? COMP_T(-value) : clamp(res, COMP_T(MIN), COMP_T(MAX)));
+        COMP_T outValue =
+            isnan(float(value)) ? value : (isinf(float(value)) ? COMP_T(-value) : clamp(res, COMP_T(MIN), COMP_T(MAX)));
 #endif
 
-    tensorWriteARM(outputData, index, ENCODE_COMP_TO_STORAGE(outValue, STORAGE_T, TYPE_IN_OUT));
+        outStorage[k] = ENCODE_COMP_TO_STORAGE(outValue, STORAGE_T, TYPE_IN_OUT);
+    }
+
+    tensorWriteARM(outputData, index, outStorage);
 }
