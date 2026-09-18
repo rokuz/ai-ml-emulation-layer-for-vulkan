@@ -1,0 +1,196 @@
+/*
+ * SPDX-FileCopyrightText: Copyright 2023-2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#define IN_T %in_t%
+#define OUT_T %out_t%
+#define RESCALE_TAIL %rescale_tail%
+#if RESCALE_TAIL
+#define TAIL_OUT_T %tail_out_t%
+#define TAIL_MUL_T %tail_mul_t%
+#define TAIL_OUT_LOWEST %tail_out_t_lowest%
+#define TAIL_OUT_MAX %tail_out_t_max%
+#define OUTPUT_T TAIL_OUT_T
+RESCALE_TAIL_DECLARE(4, 5)
+#else
+#define OUTPUT_T OUT_T
+#endif
+#define WEIGHT_T %weight_t%
+#define TYPE_IN %in_t_type%
+#define TYPE_OUT %out_t_type%
+#define TYPE_ACC %acc_t_type%
+#define ACC_T %acc_t%
+
+layout(local_size_x = %warpX%, local_size_y = %warpY%, local_size_z_id = 7) in;
+
+layout(push_constant) uniform PushConstants {
+    int32_t inputZeroPoint;
+    int32_t weightZeroPoint;
+    int32_t pad[4];
+    int32_t stride[2];
+    int32_t dilation[2];
+} pushConstants;
+
+layout(set = 0, binding = 0) uniform tensorARM<OUTPUT_T, 4> outputData;
+layout(set = 1, binding = 0) uniform tensorARM<IN_T, 4> inputData;
+layout(set = 2, binding = 0) uniform tensorARM<WEIGHT_T, 4> weightsData;
+layout(set = 3, binding = 0) uniform tensorARM<OUT_T, 1> biasesData;
+
+layout(constant_id = 5) const uint TILE_INPUT_WORDS = 1;
+layout(constant_id = 6) const uint TILE_WEIGHT_WORDS = 1;
+shared uint tileInput[TILE_INPUT_WORDS];
+shared uint tileWeights[TILE_WEIGHT_WORDS];
+layout(constant_id = 8) const uint TILE_GROUPS = 1;
+shared int tileWeightSums[4 * TILE_GROUPS];
+
+#define TILE_ONES 0x01010101
+
+
+uint packTileWord(int a, int b, int c, int d) {
+    return uint(a & 255) | (uint(b & 255) << 8) | (uint(c & 255) << 16) | (uint(d & 255) << 24);
+}
+
+void main() {
+    const uint outputChannels = tensorSizeARM(outputData, 3);
+    const uint tileGroups = gl_WorkGroupSize.z;
+    const uint channelGroups = (outputChannels + 3u) / 4u;
+    const uint batchGroups = (channelGroups + tileGroups - 1u) / tileGroups * tileGroups;
+    const uint n = gl_GlobalInvocationID.z / batchGroups;
+    const uint oc = (gl_GlobalInvocationID.z - n * batchGroups) * 4u;
+    const uint tileChannel = (gl_WorkGroupID.z * tileGroups - n * batchGroups) * 4u;
+    const uint ox = gl_GlobalInvocationID.x;
+    const uint oy = gl_GlobalInvocationID.y;
+
+    const int inputZeroPoint = PUSH_INT(0, inputZeroPoint);
+    const int weightZeroPoint = PUSH_INT(1, weightZeroPoint);
+    const int padTop = PUSH_INT(2, pad[0]);
+    const int padLeft = PUSH_INT(4, pad[2]);
+    const uint strideY = uint(PUSH_INT(6, stride[0]));
+    const uint strideX = uint(PUSH_INT(7, stride[1]));
+    const uint dilationY = uint(PUSH_INT(8, dilation[0]));
+    const uint dilationX = uint(PUSH_INT(9, dilation[1]));
+
+    const uint inputHeight = tensorSizeARM(inputData, 1);
+    const uint inputWidth = tensorSizeARM(inputData, 2);
+    const uint inputChannels = tensorSizeARM(inputData, 3);
+    const uint kernelHeight = tensorSizeARM(weightsData, 1);
+    const uint kernelWidth = tensorSizeARM(weightsData, 2);
+    const uint words = (inputChannels + 3u) / 4u;
+    const uint tileHeight = (gl_WorkGroupSize.y - 1u) * strideY + (kernelHeight - 1u) * dilationY + 1u;
+    const uint tileWidth = (gl_WorkGroupSize.x - 1u) * strideX + (kernelWidth - 1u) * dilationX + 1u;
+    const uint tilePixels = tileHeight * tileWidth;
+    const uint kernelCells = kernelHeight * kernelWidth;
+    const uint cellWords = kernelCells * words;
+    const uint threads = gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z;
+
+    const int tileY = int(gl_WorkGroupID.y * gl_WorkGroupSize.y * strideY) - padTop;
+    const int tileX = int(gl_WorkGroupID.x * gl_WorkGroupSize.x * strideX) - padLeft;
+    const uint paddingWord = packTileWord(inputZeroPoint, inputZeroPoint, inputZeroPoint, inputZeroPoint);
+    for (uint p = gl_LocalInvocationIndex; p < tilePixels; p += threads) {
+        const uint ty = p / tileWidth;
+        const int y = tileY + int(ty);
+        const int x = tileX + int(p - ty * tileWidth);
+        const uint base = p * words;
+        if (uint(y) < inputHeight && uint(x) < inputWidth) {
+            for (uint word = 0u; word < words; word++) {
+                const uint ic = word * 4u;
+                IN_T value[4];
+                tensorReadARM(inputData, uint[](n, uint(y), uint(x), ic), value);
+                tileInput[base + word] = packTileWord(int(value[0]),
+                                                      ic + 1u < inputChannels ? int(value[1]) : inputZeroPoint,
+                                                      ic + 2u < inputChannels ? int(value[2]) : inputZeroPoint,
+                                                      ic + 3u < inputChannels ? int(value[3]) : inputZeroPoint);
+            }
+        } else {
+            for (uint word = 0u; word < words; word++) {
+                tileInput[base + word] = paddingWord;
+            }
+        }
+    }
+
+    if (gl_LocalInvocationIndex < 4u * tileGroups) {
+        tileWeightSums[gl_LocalInvocationIndex] = 0;
+    }
+    barrier();
+
+    const uint weightPaddingWord = packTileWord(weightZeroPoint, weightZeroPoint, weightZeroPoint, weightZeroPoint);
+    for (uint cell = gl_LocalInvocationIndex; cell < 4u * tileGroups * kernelCells; cell += threads) {
+        const uint k = cell / kernelCells;
+        const uint position = cell - k * kernelCells;
+        const uint ky = position / kernelWidth;
+        const uint kx = position - ky * kernelWidth;
+        const uint base = k * cellWords + position * words;
+        int weightSum = 0;
+        if (tileChannel + k < outputChannels) {
+            for (uint word = 0u; word < words; word++) {
+                WEIGHT_T weight[4];
+                tensorReadARM(weightsData, uint[](tileChannel + k, ky, kx, word * 4u), weight);
+                const uint packed = packTileWord(int(weight[0]), int(weight[1]), int(weight[2]), int(weight[3]));
+                tileWeights[base + word] = packed;
+                weightSum += dotPacked4x8EXT(int(packed), TILE_ONES);
+            }
+        } else {
+            for (uint word = 0u; word < words; word++) {
+                tileWeights[base + word] = weightPaddingWord;
+                weightSum += dotPacked4x8EXT(int(weightPaddingWord), TILE_ONES);
+            }
+        }
+        atomicAdd(tileWeightSums[k], weightSum);
+    }
+
+    barrier();
+
+    if (oy >= tensorSizeARM(outputData, 1) || ox >= tensorSizeARM(outputData, 2) || oc >= outputChannels) {
+        return;
+    }
+
+    const uint ly = gl_LocalInvocationID.y;
+    const uint lx = gl_LocalInvocationID.x;
+    ivec4 acc = ivec4(0);
+    int inputSum = 0;
+    for (uint ky = 0u; ky < kernelHeight; ky++) {
+        const uint row = (ly * strideY + ky * dilationY) * tileWidth + lx * strideX;
+        for (uint kx = 0u; kx < kernelWidth; kx++) {
+            const uint inputBase = (row + kx * dilationX) * words;
+            const uint weightBase = (ky * kernelWidth + kx) * words;
+            for (uint word = 0u; word < words; word++) {
+                const int value = int(tileInput[inputBase + word]);
+                const uint weightWord = gl_LocalInvocationID.z * 4u * cellWords + weightBase + word;
+                inputSum += dotPacked4x8EXT(value, TILE_ONES);
+                acc += ivec4(dotPacked4x8EXT(value, int(tileWeights[weightWord])),
+                             dotPacked4x8EXT(value, int(tileWeights[cellWords + weightWord])),
+                             dotPacked4x8EXT(value, int(tileWeights[2u * cellWords + weightWord])),
+                             dotPacked4x8EXT(value, int(tileWeights[3u * cellWords + weightWord])));
+            }
+        }
+    }
+
+    const uint sumBase = gl_LocalInvocationID.z * 4u;
+    const int slots = int(kernelCells * words * 4u);
+    acc -= weightZeroPoint * inputSum;
+    acc -= inputZeroPoint * ivec4(tileWeightSums[sumBase], tileWeightSums[sumBase + 1u], tileWeightSums[sumBase + 2u],
+                                  tileWeightSums[sumBase + 3u]);
+    acc += slots * inputZeroPoint * weightZeroPoint;
+
+    if (tensorSizeARM(biasesData, 0) == 1) {
+        OUT_T bias;
+        tensorReadARM(biasesData, uint[](0), bias);
+        acc += ivec4(CONV_TO_ACC_BIAS(bias));
+    } else {
+        OUT_T bias[4];
+        tensorReadARM(biasesData, uint[](oc), bias);
+        acc += ivec4(CONV_TO_ACC_BIAS(bias[0]), CONV_TO_ACC_BIAS(bias[1]), CONV_TO_ACC_BIAS(bias[2]), CONV_TO_ACC_BIAS(bias[3]));
+    }
+    uint index[] = {n, oy, ox, oc};
+    OUT_T outData[4] = OUT_T[](CONV_ACC_TO_OUT(acc[0]), CONV_ACC_TO_OUT(acc[1]), CONV_ACC_TO_OUT(acc[2]), CONV_ACC_TO_OUT(acc[3]));
+#if RESCALE_TAIL
+    TAIL_OUT_T tailData[4];
+    for (uint tailIndex = 0; tailIndex < 4; tailIndex++) {
+        rescaleTail(outData[tailIndex], oc + tailIndex, tailData[tailIndex])
+    }
+    tensorWriteARM(outputData, index, tailData);
+#else
+    tensorWriteARM(outputData, index, outData);
+#endif
+}

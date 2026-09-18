@@ -1110,7 +1110,8 @@ SpirvBinary Conv2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
     };
     appendRescaleTailReplacements(keys, replacements, output, tail);
 
-    return _pipelineCache->lookup(tiles.inputWords != 0 ? tileShaderName : shaderName, keys, replacements);
+    return _pipelineCache->lookup(tiles.inputWords != 0 ? (tiles.dot ? tileDotShaderName : tileShaderName) : shaderName,
+                                  keys, replacements);
 }
 
 void Conv2D::getTileGroupCounts(const std::shared_ptr<TensorDescriptor> &output, uint32_t &groupCountX,
@@ -1140,7 +1141,8 @@ bool Conv2D::getTileWords(const std::shared_ptr<TensorDescriptor> &input,
     const uint64_t tileInputWords = tileHeight * tileWidth * words;
     const uint64_t tileWeightWords = 4 * static_cast<uint64_t>(groups) * static_cast<uint64_t>(weightDimensions[1]) *
                                      static_cast<uint64_t>(weightDimensions[2]) * words;
-    if ((tileInputWords + tileWeightWords) * sizeof(uint32_t) > sharedMemoryBytes) {
+    const uint64_t weightSumWords = 4 * static_cast<uint64_t>(groups);
+    if ((tileInputWords + tileWeightWords + weightSumWords) * sizeof(uint32_t) > sharedMemoryBytes) {
         return false;
     }
 
@@ -2635,6 +2637,25 @@ ComputeDescriptorSetMap GraphPipeline::makeConstantsDescriptorSets() const {
     return getComputeDescriptorSetMap(filter);
 }
 
+bool GraphPipeline::hasIntegerDotProduct() {
+    if (integerDotProduct < 0) {
+        VkPhysicalDeviceVulkan13Features vulkan13Features{};
+        vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+        VkPhysicalDeviceFeatures2 features2{};
+        features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        features2.pNext = &vulkan13Features;
+        loader->vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+
+        const char *const disabled = std::getenv("VMEL_DISABLE_CONV_DOT");
+        integerDotProduct = vulkan13Features.shaderIntegerDotProduct == VK_TRUE &&
+                                    (disabled == nullptr || std::string_view(disabled) == "0")
+                                ? 1
+                                : 0;
+    }
+
+    return integerDotProduct == 1;
+}
+
 void GraphPipeline::makeDescriptorSetBinding(const uint32_t set, const uint32_t binding, const uint32_t arrayIndex,
                                              const VkTensorDescriptionARM &tensorDescription) {
     auto tensorDescriptor = std::make_shared<TensorDescriptor>(loader, physicalDevice, device, tensorDescription);
@@ -2856,6 +2877,7 @@ Conv2DTiles GraphPipeline::selectConv2DTiles(const std::shared_ptr<TensorDescrip
     tiles.inputWords = tileInputWords;
     tiles.weightWords = tileWeightWords;
     tiles.groups = tileGroups;
+    tiles.dot = tileInputWords != 0 && hasIntegerDotProduct();
     return tiles;
 }
 

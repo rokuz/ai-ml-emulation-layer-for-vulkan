@@ -437,6 +437,7 @@ struct Conv2DTiles {
     uint32_t inputWords = 0;
     uint32_t weightWords = 0;
     uint32_t groups = 1;
+    bool dot = false;
 };
 
 class Conv2D : public ComputePipeline {
@@ -494,6 +495,7 @@ class Conv2D : public ComputePipeline {
 
     static constexpr std::string_view shaderName = "conv2d";
     static constexpr std::string_view tileShaderName = "conv2d_tile";
+    static constexpr std::string_view tileDotShaderName = "conv2d_tile_dot";
 };
 
 /*******************************************************************************
@@ -1575,6 +1577,8 @@ class GraphPipeline {
                                   const std::shared_ptr<TensorDescriptor> &weights, const std::vector<int32_t> &stride,
                                   const std::vector<int32_t> &dilation, uint32_t accType, const RescaleTail *tail);
 
+    bool hasIntegerDotProduct();
+
     std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> loader;
     VkPhysicalDevice physicalDevice;
     VkDevice device;
@@ -1588,6 +1592,8 @@ class GraphPipeline {
 
     // Device memory for constants
     std::vector<VkDeviceMemory> constantsDeviceMemory;
+
+    int integerDotProduct = -1;
 
     // Mapping from SPIR-V constant id to tensor
     std::map<uint32_t, std::shared_ptr<Tensor>> constTensorMap;
