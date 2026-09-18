@@ -43,10 +43,13 @@ void main() {
     const int dilation1 = PUSH_INT(12, dilation[1]);
     const int dilation2 = PUSH_INT(13, dilation[2]);
 
+    uint[5] shape = uint[](tensorSizeARM(outputData, 0), tensorSizeARM(outputData, 1),
+                           tensorSizeARM(outputData, 2), tensorSizeARM(outputData, 3),
+                           tensorSizeARM(outputData, 4));
     uint[5] index;
-    getDispatchIndex5(outputData, index);
+    getVectorIndex(index, shape)
 
-    ACC_T acc = ACC_T(0);
+    ACC_T acc[4] = ACC_T[4](ACC_T(0), ACC_T(0), ACC_T(0), ACC_T(0));
 
     uint n = index[0];
     uint od = index[1];
@@ -94,30 +97,53 @@ void main() {
     for (int d = dStart, kd = kdStart; kd < KD && d < ID; ++kd, d += dilation0) {
         for (int y = yStart, ky = kyStart; ky < KH && y < IH; ++ky, y += dilation1) {
             for (int x = xStart, kx = kxStart; kx < KW && x < IW; ++kx, x += dilation2) {
-                for (int ic = 0; ic < IC; ++ic) {
-                    IN_T inputValue;
+                int ic = 0;
+                for (; ic + 4 <= IC; ic += 4) {
+                    IN_T inputValue[4];
                     tensorReadARM(inputData, uint[](n, uint(d), uint(y), uint(x), uint(ic)), inputValue);
 
-                    WEIGHT_T weightValue;
-                    tensorReadARM(weightsData, uint[](oc, uint(kd), uint(ky), uint(kx), uint(ic)), weightValue);
+                    for (uint k = 0; k < 4; k++) {
+                        WEIGHT_T weightValue[4];
+                        tensorReadARM(weightsData, uint[](oc + k, uint(kd), uint(ky), uint(kx), uint(ic)),
+                                      weightValue);
 
+                        for (uint idx = 0; idx < 4; idx++) {
+                            ACC_T val = CONV_TO_ACC_INPUT(inputValue[idx]) - ACC_T(PUSH_INT(0, inputZeroPoint));
+                            ACC_T wt = CONV_TO_ACC_WEIGHT(weightValue[idx]) - ACC_T(PUSH_INT(1, weightZeroPoint));
+                            acc[k] += val * wt;
+                        }
+                    }
+                }
+
+                for (; ic < IC; ++ic) {
+                    IN_T inputValue;
+                    tensorReadARM(inputData, uint[](n, uint(d), uint(y), uint(x), uint(ic)), inputValue);
                     ACC_T val = CONV_TO_ACC_INPUT(inputValue) - ACC_T(PUSH_INT(0, inputZeroPoint));
-                    ACC_T wt = CONV_TO_ACC_WEIGHT(weightValue) - ACC_T(PUSH_INT(1, weightZeroPoint));
-                    acc += val * wt;
+
+                    for (uint k = 0; k < 4; k++) {
+                        WEIGHT_T weightValue;
+                        tensorReadARM(weightsData, uint[](oc + k, uint(kd), uint(ky), uint(kx), uint(ic)),
+                                      weightValue);
+                        ACC_T wt = CONV_TO_ACC_WEIGHT(weightValue) - ACC_T(PUSH_INT(1, weightZeroPoint));
+                        acc[k] += val * wt;
+                    }
                 }
             }
         }
     }
 
-    OUT_T bias;
-    tensorReadARM(biasesData, uint[](tensorSizeARM(biasesData, 0) == 1 ? 0 : oc), bias);
-    ACC_T bias_acc = CONV_TO_ACC_BIAS(bias);
-    ACC_T sum = bias_acc + acc;
-    OUT_T outVal = CONV_ACC_TO_OUT(sum);
+    OUT_T outVal[4];
+    for (uint k = 0; k < 4; k++) {
+        OUT_T bias;
+        tensorReadARM(biasesData, uint[](tensorSizeARM(biasesData, 0) == 1 ? 0 : oc + k), bias);
+        outVal[k] = CONV_ACC_TO_OUT(CONV_TO_ACC_BIAS(bias) + acc[k]);
+    }
 
 #if RESCALE_TAIL
-    TAIL_OUT_T tailValue;
-    rescaleTail(outVal, oc, tailValue)
+    TAIL_OUT_T tailValue[4];
+    for (uint k = 0; k < 4; k++) {
+        rescaleTail(outVal[k], oc + k, tailValue[k])
+    }
     tensorWriteARM(outputData, index, tailValue);
 #else
     tensorWriteARM(outputData, index, outVal);

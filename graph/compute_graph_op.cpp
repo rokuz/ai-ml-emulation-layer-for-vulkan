@@ -1306,6 +1306,8 @@ SpirvBinary Conv3D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
     return _pipelineCache->lookup(shaderName, keys, replacements);
 }
 
+void Conv3D::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * DepthwiseConv2D
  *******************************************************************************/
