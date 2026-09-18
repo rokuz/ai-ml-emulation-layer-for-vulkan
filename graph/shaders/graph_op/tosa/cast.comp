@@ -22,11 +22,17 @@ layout(set = 0, binding = 0) uniform tensorARM<OUT_T, RANK> outputData;
 layout(set = 1, binding = 0) uniform tensorARM<IN_T, RANK> inputData;
 
 void main() {
+    uint[RANK] shape;
+    getShape(shape, outputData)
     uint[RANK] index;
-    getDispatchIndex(outputData, index);
-    IN_T rawValue;
-    tensorReadARM(inputData, index, rawValue);
-    IN_COMP_T value = DECODE_STORAGE_TO_COMP(rawValue, TYPE_IN, IN_COMP_T);
+    getVectorIndex(index, shape)
+
+    IN_T valueGroup[4];
+    tensorReadARM(inputData, index, valueGroup);
+
+    OUT_T outValues[4];
+    for (uint k = 0; k < 4; k++) {
+    IN_COMP_T value = DECODE_STORAGE_TO_COMP(valueGroup[k], TYPE_IN, IN_COMP_T);
 
 #if IS_BOOL(TYPE_OUT)
     OUT_T outValue = OUT_T(value != IN_COMP_T(0));
@@ -64,5 +70,9 @@ void main() {
 #else
     OUT_T outValue = ENCODE_COMP_TO_STORAGE_RNE(value, OUT_T, TYPE_OUT);
 #endif
-    tensorWriteARM(outputData, index, outValue);
+
+    outValues[k] = outValue;
+    }
+
+    tensorWriteARM(outputData, index, outValues);
 }

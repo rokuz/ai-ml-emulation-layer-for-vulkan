@@ -821,6 +821,8 @@ SpirvBinary Cast::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCac
     return _pipelineCache->lookup(shaderName, {inType->glslType, outType->glslType});
 }
 
+void Cast::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * Clamp
  *******************************************************************************/
@@ -859,6 +861,8 @@ SpirvBinary Clamp::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCa
 
     return _pipelineCache->lookup(shaderName, {inOutType->glslType});
 }
+
+void Clamp::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * Concat
@@ -1660,6 +1664,8 @@ SpirvBinary Negate::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
 
     return _pipelineCache->lookup(shaderName, {inOutType->glslType, accType});
 }
+
+void Negate::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * Pad
