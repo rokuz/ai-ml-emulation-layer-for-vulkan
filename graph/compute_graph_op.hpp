@@ -433,6 +433,11 @@ class Concat : public ComputePipeline {
  * Conv2D
  *******************************************************************************/
 
+struct Conv2DTiles {
+    uint32_t inputWords = 0;
+    uint32_t weightWords = 0;
+};
+
 class Conv2D : public ComputePipeline {
   public:
     Conv2D(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> &_loader, VkDevice _device,
@@ -441,7 +446,19 @@ class Conv2D : public ComputePipeline {
            const std::shared_ptr<TensorDescriptor> &_biases, const std::vector<int32_t> &_pad,
            const std::vector<int32_t> &_stride, const std::vector<int32_t> &_dilation, int8_t _inputZeroPoint,
            int8_t _weightZeroPoint, uint32_t _accType, const std::array<uint32_t, 3> &_maxGroupCount,
-           const std::string &debugName, const RescaleTail *_tail = nullptr);
+           const std::string &debugName, const RescaleTail *_tail = nullptr, const Conv2DTiles &_tiles = {});
+
+    static bool getTileWords(const std::shared_ptr<TensorDescriptor> &input,
+                             const std::shared_ptr<TensorDescriptor> &weights, const std::vector<int32_t> &stride,
+                             const std::vector<int32_t> &dilation, uint32_t sharedMemoryBytes, uint32_t &inputWords,
+                             uint32_t &weightWords);
+
+    static void getTileGroupCounts(const std::shared_ptr<TensorDescriptor> &output, uint32_t &groupCountX,
+                                   uint32_t &groupCountY);
+
+    static const uint32_t warpX = 8;
+    static const uint32_t warpY = 8;
+    static const uint32_t warpZ = 1;
 
   private:
     struct PushConstant {
@@ -465,19 +482,17 @@ class Conv2D : public ComputePipeline {
     SpirvBinary createSpirv(const std::shared_ptr<PipelineCache> &pipelineCache,
                             const std::shared_ptr<TensorDescriptor> &input,
                             const std::shared_ptr<TensorDescriptor> &output,
-                            const std::shared_ptr<TensorDescriptor> &weights, uint32_t accType,
-                            const RescaleTail *tail) const;
+                            const std::shared_ptr<TensorDescriptor> &weights, uint32_t accType, const RescaleTail *tail,
+                            const Conv2DTiles &tiles) const;
 
     void cmdDispatch(VkCommandBuffer commandBuffer) override;
 
     PushConstant pushConstant;
     std::array<uint32_t, 3> maxGroupCount;
+    Conv2DTiles tiles;
 
     static constexpr std::string_view shaderName = "conv2d";
-
-    static const uint32_t warpX = 8;
-    static const uint32_t warpY = 8;
-    static const uint32_t warpZ = 1;
+    static constexpr std::string_view tileShaderName = "conv2d_tile";
 };
 
 /*******************************************************************************
@@ -1554,10 +1569,16 @@ class GraphPipeline {
 
     ComputeDescriptorSetMap getComputeDescriptorSetMap(const TensorDescriptorMap &filter) const;
 
+    Conv2DTiles selectConv2DTiles(const std::shared_ptr<TensorDescriptor> &input,
+                                  const std::shared_ptr<TensorDescriptor> &output,
+                                  const std::shared_ptr<TensorDescriptor> &weights, const std::vector<int32_t> &stride,
+                                  const std::vector<int32_t> &dilation, uint32_t accType, const RescaleTail *tail);
+
     std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> loader;
     VkPhysicalDevice physicalDevice;
     VkDevice device;
     std::array<uint32_t, 3> maxComputeWorkGroupCount;
+    uint32_t maxComputeSharedMemorySize;
 
     std::shared_ptr<PipelineCache> pipelineCache;
     std::vector<std::shared_ptr<ComputePipelineBase>> pipelines;
