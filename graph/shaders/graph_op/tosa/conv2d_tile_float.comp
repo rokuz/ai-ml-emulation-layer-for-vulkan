@@ -1,0 +1,180 @@
+/*
+ * SPDX-FileCopyrightText: Copyright 2023-2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#define IN_T %in_t%
+#define OUT_T %out_t%
+#define WEIGHT_T %weight_t%
+#define TYPE_IN %in_t_type%
+#define TYPE_WEIGHT %weight_t_type%
+#define TYPE_OUT %out_t_type%
+#define TYPE_ACC %acc_t_type%
+#define ACC_T %acc_t%
+
+#if TYPE_ACC == TYPE_INT64
+    #define VEC4 i64vec4
+#elif TYPE_ACC == TYPE_INT32
+    #define VEC4 ivec4
+#else
+    #define VEC4 vec4
+#endif
+
+layout(local_size_x = %warpX%, local_size_y = %warpY%, local_size_z_id = 7) in;
+
+layout(push_constant) uniform PushConstants {
+    int32_t inputZeroPoint;
+    int32_t weightZeroPoint;
+    int32_t pad[4];
+    int32_t stride[2];
+    int32_t dilation[2];
+} pushConstants;
+
+layout(set = 0, binding = 0) uniform tensorARM<OUT_T, 4> outputData;
+layout(set = 1, binding = 0) uniform tensorARM<IN_T, 4> inputData;
+layout(set = 2, binding = 0) uniform tensorARM<WEIGHT_T, 4> weightsData;
+layout(set = 3, binding = 0) uniform tensorARM<OUT_T, 1> biasesData;
+
+layout(constant_id = 5) const uint TILE_INPUT_VALUES = 1;
+layout(constant_id = 6) const uint TILE_WEIGHT_VALUES = 1;
+shared IN_T tileInput[TILE_INPUT_VALUES];
+shared WEIGHT_T tileWeights[TILE_WEIGHT_VALUES];
+
+void main() {
+    const int weightZeroPoint = PUSH_INT(1, weightZeroPoint);
+
+    const uint outputChannels = tensorSizeARM(outputData, 3);
+    const uint tileGroups = gl_WorkGroupSize.z;
+    const uint channelGroups = (outputChannels + 3u) / 4u;
+    const uint batchGroups = (channelGroups + tileGroups - 1u) / tileGroups * tileGroups;
+    const uint n = gl_GlobalInvocationID.z / batchGroups;
+    const uint oc = (gl_GlobalInvocationID.z - n * batchGroups) * 4u;
+    const uint tileChannel = (gl_WorkGroupID.z * tileGroups - n * batchGroups) * 4u;
+    const uint ox = gl_GlobalInvocationID.x;
+    const uint oy = gl_GlobalInvocationID.y;
+
+    const int padTop = PUSH_INT(2, pad[0]);
+    const int padLeft = PUSH_INT(4, pad[2]);
+    const uint strideY = uint(PUSH_INT(6, stride[0]));
+    const uint strideX = uint(PUSH_INT(7, stride[1]));
+    const uint dilationY = uint(PUSH_INT(8, dilation[0]));
+    const uint dilationX = uint(PUSH_INT(9, dilation[1]));
+
+    const uint inputHeight = tensorSizeARM(inputData, 1);
+    const uint inputWidth = tensorSizeARM(inputData, 2);
+    const uint IC = tensorSizeARM(inputData, 3);
+    const uint kernelHeight = tensorSizeARM(weightsData, 1);
+    const uint kernelWidth = tensorSizeARM(weightsData, 2);
+    const uint values = (IC + 3u) / 4u * 4u;
+    const uint tileHeight = (gl_WorkGroupSize.y - 1u) * strideY + (kernelHeight - 1u) * dilationY + 1u;
+    const uint tileWidth = (gl_WorkGroupSize.x - 1u) * strideX + (kernelWidth - 1u) * dilationX + 1u;
+    const uint tilePixels = tileHeight * tileWidth;
+    const uint kernelCells = kernelHeight * kernelWidth;
+    const uint cellValues = kernelCells * values;
+    const uint threads = gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z;
+
+    const int tileY = int(gl_WorkGroupID.y * gl_WorkGroupSize.y * strideY) - padTop;
+    const int tileX = int(gl_WorkGroupID.x * gl_WorkGroupSize.x * strideX) - padLeft;
+    for (uint p = gl_LocalInvocationIndex; p < tilePixels; p += threads) {
+        const uint ty = p / tileWidth;
+        const int y = tileY + int(ty);
+        const int x = tileX + int(p - ty * tileWidth);
+        if (uint(y) < inputHeight && uint(x) < inputWidth) {
+            const uint base = p * values;
+            for (uint ic = 0u; ic < values; ic += 4u) {
+                IN_T value[4];
+                tensorReadARM(inputData, uint[](n, uint(y), uint(x), ic), value);
+                tileInput[base + ic] = value[0];
+                tileInput[base + ic + 1u] = value[1];
+                tileInput[base + ic + 2u] = value[2];
+                tileInput[base + ic + 3u] = value[3];
+            }
+        }
+    }
+
+    for (uint cell = gl_LocalInvocationIndex; cell < 4u * tileGroups * kernelCells; cell += threads) {
+        const uint k = cell / kernelCells;
+        const uint position = cell - k * kernelCells;
+        const uint ky = position / kernelWidth;
+        const uint kx = position - ky * kernelWidth;
+        if (tileChannel + k < outputChannels) {
+            const uint base = k * cellValues + position * values;
+            for (uint ic = 0u; ic < values; ic += 4u) {
+                WEIGHT_T weight[4];
+                tensorReadARM(weightsData, uint[](tileChannel + k, ky, kx, ic), weight);
+                tileWeights[base + ic] = weight[0];
+                tileWeights[base + ic + 1u] = weight[1];
+                tileWeights[base + ic + 2u] = weight[2];
+                tileWeights[base + ic + 3u] = weight[3];
+            }
+        }
+    }
+
+    barrier();
+
+    if (oy >= tensorSizeARM(outputData, 1) || ox >= tensorSizeARM(outputData, 2) || oc >= outputChannels) {
+        return;
+    }
+
+    const uint ly = gl_LocalInvocationID.y;
+    const uint lx = gl_LocalInvocationID.x;
+    const uint groupBase = gl_LocalInvocationID.z * 4u * cellValues;
+    ACC_T acc[4] = {ACC_T(0), ACC_T(0), ACC_T(0), ACC_T(0)};
+    for (uint ky = 0u; ky < kernelHeight; ky++) {
+        const uint sy = ly * strideY + ky * dilationY;
+        const uint y = uint(tileY + int(sy));
+        for (uint kx = 0u; kx < kernelWidth; kx++) {
+            const uint sx = lx * strideX + kx * dilationX;
+            const uint x = uint(tileX + int(sx));
+
+            if (y < inputHeight && x < inputWidth) {
+                const uint inputBase = (sy * tileWidth + sx) * values;
+                const uint weightBase = groupBase + (ky * kernelWidth + kx) * values;
+                for (uint ic = 0u; ic < IC; ic += 4u) {
+                    VEC4 value = VEC4(CONV_TO_ACC_INPUT(tileInput[inputBase + ic]), CONV_TO_ACC_INPUT(tileInput[inputBase + ic + 1u]),
+                                      CONV_TO_ACC_INPUT(tileInput[inputBase + ic + 2u]), CONV_TO_ACC_INPUT(tileInput[inputBase + ic + 3u]));
+
+                    VEC4 outValue = value - PUSH_INT(0, inputZeroPoint);
+                    VEC4 outWeight0 = VEC4(CONV_TO_ACC_WEIGHT(tileWeights[weightBase + ic]), CONV_TO_ACC_WEIGHT(tileWeights[weightBase + ic + 1u]),
+                                           CONV_TO_ACC_WEIGHT(tileWeights[weightBase + ic + 2u]), CONV_TO_ACC_WEIGHT(tileWeights[weightBase + ic + 3u])) - weightZeroPoint;
+                    VEC4 outWeight1 = VEC4(CONV_TO_ACC_WEIGHT(tileWeights[cellValues + weightBase + ic]), CONV_TO_ACC_WEIGHT(tileWeights[cellValues + weightBase + ic + 1u]),
+                                           CONV_TO_ACC_WEIGHT(tileWeights[cellValues + weightBase + ic + 2u]), CONV_TO_ACC_WEIGHT(tileWeights[cellValues + weightBase + ic + 3u])) - weightZeroPoint;
+                    VEC4 outWeight2 = VEC4(CONV_TO_ACC_WEIGHT(tileWeights[2u * cellValues + weightBase + ic]), CONV_TO_ACC_WEIGHT(tileWeights[2u * cellValues + weightBase + ic + 1u]),
+                                           CONV_TO_ACC_WEIGHT(tileWeights[2u * cellValues + weightBase + ic + 2u]), CONV_TO_ACC_WEIGHT(tileWeights[2u * cellValues + weightBase + ic + 3u])) - weightZeroPoint;
+                    VEC4 outWeight3 = VEC4(CONV_TO_ACC_WEIGHT(tileWeights[3u * cellValues + weightBase + ic]), CONV_TO_ACC_WEIGHT(tileWeights[3u * cellValues + weightBase + ic + 1u]),
+                                           CONV_TO_ACC_WEIGHT(tileWeights[3u * cellValues + weightBase + ic + 2u]), CONV_TO_ACC_WEIGHT(tileWeights[3u * cellValues + weightBase + ic + 3u])) - weightZeroPoint;
+
+                    VEC4 mul0 = outValue * outWeight0;
+                    VEC4 mul1 = outValue * outWeight1;
+                    VEC4 mul2 = outValue * outWeight2;
+                    VEC4 mul3 = outValue * outWeight3;
+                    for (uint idx = 0; idx < 4 && ic + idx < IC; ++idx) {
+                        acc[0] += ACC_T(mul0[idx]);
+                        acc[1] += ACC_T(mul1[idx]);
+                        acc[2] += ACC_T(mul2[idx]);
+                        acc[3] += ACC_T(mul3[idx]);
+                    }
+                }
+            }
+        }
+    }
+
+    if (tensorSizeARM(biasesData, 0) == 1) {
+        OUT_T bias;
+        tensorReadARM(biasesData, uint[](0), bias);
+        acc[0] += CONV_TO_ACC_BIAS(bias);
+        acc[1] += CONV_TO_ACC_BIAS(bias);
+        acc[2] += CONV_TO_ACC_BIAS(bias);
+        acc[3] += CONV_TO_ACC_BIAS(bias);
+    } else {
+        OUT_T bias[4];
+        tensorReadARM(biasesData, uint[](oc), bias);
+        acc[0] += CONV_TO_ACC_BIAS(bias[0]);
+        acc[1] += CONV_TO_ACC_BIAS(bias[1]);
+        acc[2] += CONV_TO_ACC_BIAS(bias[2]);
+        acc[3] += CONV_TO_ACC_BIAS(bias[3]);
+    }
+    uint index[] = {n, oy, ox, oc};
+    OUT_T outData[4] = OUT_T[](CONV_ACC_TO_OUT(acc[0]), CONV_ACC_TO_OUT(acc[1]), CONV_ACC_TO_OUT(acc[2]), CONV_ACC_TO_OUT(acc[3]));
+    tensorWriteARM(outputData, index, outData);
+}

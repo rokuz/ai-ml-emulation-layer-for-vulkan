@@ -338,6 +338,19 @@ foreach(TAIL_OUT_T int8_t int16_t int)
     endforeach()
 endforeach()
 
+set(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_tile_float_float_float_float_float.spv")
+mlel_generate_glsl(
+    INPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_tile_float.comp"
+    OUTPUT ${OUTPUT}
+    REPLACE "warpX=${WARPX}"
+    REPLACE "warpY=${WARPY}"
+    REPLACE "warpZ=${WARPZ}"
+    REPLACE "in_t=float"
+    REPLACE "weight_t=float"
+    REPLACE "out_t=float"
+    REPLACE "acc_t=float")
+list(APPEND SPV_FILES ${OUTPUT})
+
 set(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_tile_dot_int8_t_int8_t_int_int.spv")
 mlel_generate_glsl(
     INPUT "${CMAKE_CURRENT_BINARY_DIR}/conv2d_tile_dot.comp"
