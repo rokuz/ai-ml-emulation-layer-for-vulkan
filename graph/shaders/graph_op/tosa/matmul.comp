@@ -42,14 +42,25 @@ void main() {
     const int inputZeroPoint1 = PUSH_INT(0, inputZeroPoint1);
     const int inputZeroPoint2 = PUSH_INT(1, inputZeroPoint2);
 
+#if IS_FLOAT(TYPE_IN) || IS_REDUCED_FLOAT(TYPE_IN)
     uint[3] index;
     getDispatchIndex3(outputData, index);
+#else
+    uint[3] shape = uint[](tensorSizeARM(outputData, 0), tensorSizeARM(outputData, 1),
+                           tensorSizeARM(outputData, 2));
+    uint[3] index;
+    getVectorIndex(index, shape)
+#endif
 
     uint on = index[0];
     uint oy = index[1];
     uint ox = index[2];
 
+#if IS_FLOAT(TYPE_IN) || IS_REDUCED_FLOAT(TYPE_IN)
     COMP_T acc = COMP_T(0);
+#else
+    COMP_T acc[4] = COMP_T[4](COMP_T(0), COMP_T(0), COMP_T(0), COMP_T(0));
+#endif
 
     const uint IC = tensorSizeARM(inputData1, 2);
 
@@ -58,6 +69,7 @@ void main() {
         IN_T value1[4];
         tensorReadARM(inputData1, uint[](on, oy, c), value1);
 
+#if IS_FLOAT(TYPE_IN) || IS_REDUCED_FLOAT(TYPE_IN)
         IN_T value20, value21, value22, value23;
         tensorReadARM(inputData2, uint[](on, c, ox), value20);
         tensorReadARM(inputData2, uint[](on, c + 1, ox), value21);
@@ -70,18 +82,42 @@ void main() {
             COMP_T val2 = DECODE_STORAGE_TO_COMP(value2[idx], TYPE_IN, COMP_T) - COMP_T(inputZeroPoint2);
             acc += val1 * val2;
         }
+#else
+        for (uint idx = 0; idx < 4; ++idx) {
+            COMP_T val1 = DECODE_STORAGE_TO_COMP(value1[idx], TYPE_IN, COMP_T) - COMP_T(inputZeroPoint1);
+
+            IN_T value2[4];
+            tensorReadARM(inputData2, uint[](on, c + idx, ox), value2);
+
+            for (uint k = 0; k < 4; ++k) {
+                COMP_T val2 = DECODE_STORAGE_TO_COMP(value2[k], TYPE_IN, COMP_T) - COMP_T(inputZeroPoint2);
+                acc[k] += val1 * val2;
+            }
+        }
+#endif
     }
 
     for (; c < IC; ++c) {
-        IN_T v1, v2;
+        IN_T v1;
         tensorReadARM(inputData1, uint[](on, oy, c), v1);
-        tensorReadARM(inputData2, uint[](on, c, ox), v2);
-
         COMP_T val1 = DECODE_STORAGE_TO_COMP(v1, TYPE_IN, COMP_T) - COMP_T(inputZeroPoint1);
-        COMP_T val2 = DECODE_STORAGE_TO_COMP(v2, TYPE_IN, COMP_T) - COMP_T(inputZeroPoint2);
-        acc += val1 * val2;
+
+#if IS_FLOAT(TYPE_IN) || IS_REDUCED_FLOAT(TYPE_IN)
+        IN_T v2;
+        tensorReadARM(inputData2, uint[](on, c, ox), v2);
+        acc += val1 * (DECODE_STORAGE_TO_COMP(v2, TYPE_IN, COMP_T) - COMP_T(inputZeroPoint2));
+#else
+        IN_T value2[4];
+        tensorReadARM(inputData2, uint[](on, c, ox), value2);
+
+        for (uint k = 0; k < 4; ++k) {
+            COMP_T val2 = DECODE_STORAGE_TO_COMP(value2[k], TYPE_IN, COMP_T) - COMP_T(inputZeroPoint2);
+            acc[k] += val1 * val2;
+        }
+#endif
     }
 
+#if IS_FLOAT(TYPE_IN) || IS_REDUCED_FLOAT(TYPE_IN)
     OUT_T outValue = ENCODE_COMP_TO_STORAGE(acc, OUT_T, TYPE_OUT);
 #if RESCALE_TAIL
     TAIL_OUT_T tailValue;
@@ -89,5 +125,20 @@ void main() {
     tensorWriteARM(outputData, index, tailValue);
 #else
     tensorWriteARM(outputData, index, outValue);
+#endif
+#else
+    OUT_T outValue[4];
+    for (uint k = 0; k < 4; ++k) {
+        outValue[k] = ENCODE_COMP_TO_STORAGE(acc[k], OUT_T, TYPE_OUT);
+    }
+#if RESCALE_TAIL
+    TAIL_OUT_T tailValue[4];
+    for (uint k = 0; k < 4; ++k) {
+        rescaleTail(outValue[k], ox + k, tailValue[k])
+    }
+    tensorWriteARM(outputData, index, tailValue);
+#else
+    tensorWriteARM(outputData, index, outValue);
+#endif
 #endif
 }

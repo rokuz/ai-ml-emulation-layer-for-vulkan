@@ -736,6 +736,8 @@ class Matmul : public ComputePipeline {
 
     PushConstant pushConstant;
 
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     static constexpr std::string_view shaderName = "matmul";
 };
 
