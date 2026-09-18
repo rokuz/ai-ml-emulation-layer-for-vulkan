@@ -38,9 +38,6 @@ layout(set = 2, binding = 0) uniform tensorARM<WEIGHT_T, 4> weightsData;   // [O
 layout(set = 3, binding = 0) uniform tensorARM<OUT_T, 1> biasesData;       // [BC]
 
 void main() {
-    const int stride0 = PUSH_INT(6, stride[0]);
-    const int stride1 = PUSH_INT(7, stride[1]);
-
     uint[4] index;
     getDispatchIndex4(outputData, index);
 
@@ -53,30 +50,38 @@ void main() {
     tensorReadARM(biasesData, uint[](tensorSizeARM(biasesData, 0) == 1 ? 0 : oc), tempAcc);
     ACC_T acc = CONV_TO_ACC_BIAS(tempAcc);
 
-    for (uint ky = 0; ky < tensorSizeARM(weightsData, 1); ky++) {
-        for (uint kx = 0; kx < tensorSizeARM(weightsData, 2); kx++) {
-            int iy = int(oy) - PUSH_INT(2, pad[0]) - int(ky);
-            int ix = int(ox) - PUSH_INT(4, pad[2]) - int(kx);
+    const int KH = int(tensorSizeARM(weightsData, 1));
+    const int KW = int(tensorSizeARM(weightsData, 2));
+    const int IH = int(tensorSizeARM(inputData, 1));
+    const int IW = int(tensorSizeARM(inputData, 2));
+    const uint IC = tensorSizeARM(inputData, 3);
 
-            if (((iy % stride0) == 0) && ((ix % stride1) == 0)) {
-                iy /= stride0;
-                ix /= stride1;
+    const int strideY = PUSH_INT(6, stride[0]);
+    const int strideX = PUSH_INT(7, stride[1]);
+    const int baseY = int(oy) - PUSH_INT(2, pad[0]);
+    const int baseX = int(ox) - PUSH_INT(4, pad[2]);
+    const int kyStart = ((baseY % strideY) + strideY) % strideY;
+    const int kxStart = ((baseX % strideX) + strideX) % strideX;
 
-                if ((iy >= 0) && (ix >= 0) &&
-                    (uint(iy) < tensorSizeARM(inputData, 1)) &&
-                    (uint(ix) < tensorSizeARM(inputData, 2))) {
-                    const uint IC = tensorSizeARM(inputData, 3);
-                    for (uint ic = 0; ic < IC; ++ic) {
-                        IN_T inV;
-                        WEIGHT_T wV;
-                        tensorReadARM(inputData, uint[](n, uint(iy), uint(ix), ic), inV);
-                        tensorReadARM(weightsData, uint[](oc, ky, kx, ic), wV);
+    for (int ky = kyStart, iy = (baseY - kyStart) / strideY; ky < KH && iy >= 0; ky += strideY, iy--) {
+        if (iy >= IH) {
+            continue;
+        }
 
-                        ACC_T inAcc = CONV_TO_ACC_INPUT(inV) - ACC_T(PUSH_INT(0, inputZeroPoint));
-                        ACC_T wAcc = CONV_TO_ACC_WEIGHT(wV) - ACC_T(PUSH_INT(1, weightZeroPoint));
-                        acc += inAcc * wAcc;
-                    }
-                }
+        for (int kx = kxStart, ix = (baseX - kxStart) / strideX; kx < KW && ix >= 0; kx += strideX, ix--) {
+            if (ix >= IW) {
+                continue;
+            }
+
+            for (uint ic = 0; ic < IC; ++ic) {
+                IN_T inV;
+                WEIGHT_T wV;
+                tensorReadARM(inputData, uint[](n, uint(iy), uint(ix), ic), inV);
+                tensorReadARM(weightsData, uint[](oc, uint(ky), uint(kx), ic), wV);
+
+                ACC_T inAcc = CONV_TO_ACC_INPUT(inV) - ACC_T(PUSH_INT(0, inputZeroPoint));
+                ACC_T wAcc = CONV_TO_ACC_WEIGHT(wV) - ACC_T(PUSH_INT(1, weightZeroPoint));
+                acc += inAcc * wAcc;
             }
         }
     }
