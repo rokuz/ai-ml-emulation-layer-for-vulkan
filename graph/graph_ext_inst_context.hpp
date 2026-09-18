@@ -17,12 +17,14 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <tuple>
 #include <typeinfo>
+#include <unordered_set>
 #include <vector>
 
 /*******************************************************************************
@@ -68,6 +70,8 @@ class GraphExtInstContext {
     std::shared_ptr<mlsdk::el::compute::TensorDescriptor> getTensor(const Operand &operand, uint32_t arrayIndex = 0);
 
     std::shared_ptr<mlsdk::el::compute::TensorDescriptor> getOrMakeCompositeTensor(uint32_t id);
+
+    bool isProduced(uint32_t id) const;
 
     bool getBoolConstant(const Operand &operand);
 
@@ -137,6 +141,15 @@ class GraphExtInstContext {
     std::string debugName(const Instruction *, const std::string &defaultName) const { return defaultName; }
     const analysis::Constant *findConstant(uint32_t id) const {
         return irContext.get_constant_mgr()->FindDeclaredConstant(id);
+    }
+
+    void markMerged(uint32_t resultId) { mergedResultIds.insert(resultId); }
+    bool isMerged(uint32_t resultId) const { return mergedResultIds.count(resultId) != 0; }
+
+    VkFormat elementFormat(uint32_t id) const { return getVkFormat(getTensorType(id)->element_type()); }
+
+    void forEachUse(uint32_t id, const std::function<void(Instruction *, uint32_t)> &callback) const {
+        irContext.get_def_use_mgr()->ForEachUse(id, callback);
     }
 
   private:
@@ -209,6 +222,7 @@ class GraphExtInstContext {
 
     IRContext &irContext;
     GraphPipeline &graphPipeline;
+    std::unordered_set<uint32_t> mergedResultIds;
     // Local cache from SPIR-V result id to the tensor descriptors used while lowering a graph.
     // Slot 1 is for multi-result logical values (for example FFT-style ops), not descriptor array elements.
     std::map<uint32_t, std::array<std::shared_ptr<mlsdk::el::compute::TensorDescriptor>, 2>> tensorMap;

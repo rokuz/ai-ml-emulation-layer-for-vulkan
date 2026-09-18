@@ -61,6 +61,10 @@ void GraphPassExtInst::handleGraph(const Graph *graph, GraphExtInstContext &lowe
                                      std::to_string(static_cast<unsigned>(opExtInst->opcode())));
         }
 
+        if (loweringContext.isMerged(opExtInst->result_id())) {
+            continue;
+        }
+
         const auto importId = opExtInst->GetInOperand(0).AsId();
         auto decoder = decodersByImportId.find(importId);
         if (decoder == decodersByImportId.end()) {

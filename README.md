@@ -262,6 +262,25 @@ Using **PowerShell**:
 $env:VMEL_DISABLE_SPECIALIZATION="1"
 ```
 
+CONV2D, CONV3D, DEPTHWISE_CONV2D, TRANSPOSE_CONV2D and MATMUL over int8 inputs
+and weights with an int32 output write the result of a RESCALE directly when
+that RESCALE is the only consumer of their output and its multiplier and shift
+are available before the operator runs, so that the intermediate tensor is
+neither written nor allocated. Set `VMEL_DISABLE_OPERATOR_FUSION` to run every
+operator separately.
+
+Using **shell**:
+
+```shell
+export VMEL_DISABLE_OPERATOR_FUSION=1
+```
+
+Using **PowerShell**:
+
+```powershell
+$env:VMEL_DISABLE_OPERATOR_FUSION="1"
+```
+
 ## Usage on Linux
 
 You can enable the graph and tensor layers using environment variables only,
