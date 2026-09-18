@@ -860,6 +860,8 @@ class Pad : public ComputePipeline {
 
     PushConstant pushConstant;
 
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     static constexpr std::string_view shaderName = "pad";
 };
 
@@ -1108,6 +1110,8 @@ class Slice : public ComputePipeline {
                             const std::shared_ptr<TensorDescriptor> &input) const;
 
     PushConstant pushConstant;
+    void cmdDispatch(VkCommandBuffer commandBuffer) override;
+
     static constexpr std::string_view shaderName = "slice";
 };
 

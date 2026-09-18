@@ -20,8 +20,10 @@ layout(set = 1, binding = 0) uniform tensorARM<IN_OUT_T, RANK> inputData;
 layout(set = 2, binding = 0) uniform tensorARM<int32_t, 1> paddingData;
 
 void main() {
+    uint[RANK] shape;
+    getShape(shape, outputData)
     uint[RANK] index;
-    getDispatchIndex(outputData, index);
+    getVectorIndex(index, shape)
 
     uint[RANK] inputShape;
     getShape(inputShape, inputData);
@@ -33,22 +35,31 @@ void main() {
         tensorReadARM(paddingData, uint[1](2*i), padding);
 
         inputIndex[i] = index[i] - padding;
-        if (inputIndex[i] >= inputShape[i]) {
+        if (i + 1 < RANK && inputIndex[i] >= inputShape[i]) {
             isPad = true;
-            break;
         }
     }
 
-    IN_OUT_T value;
-
-    if (isPad) {
 #if (TYPE_IN_OUT == TYPE_INT32)
-    value = IN_OUT_T(pushConstants.padConstInt);
+    const IN_OUT_T padValue = IN_OUT_T(pushConstants.padConstInt);
 #else
-    value = ENCODE_COMP_TO_STORAGE(pushConstants.padConst, IN_OUT_T, TYPE_IN_OUT);
+    const IN_OUT_T padValue = ENCODE_COMP_TO_STORAGE(pushConstants.padConst, IN_OUT_T, TYPE_IN_OUT);
 #endif
-    } else {
+
+    const uint lastInput = inputIndex[RANK - 1];
+    IN_OUT_T value[4];
+
+    if (!isPad && lastInput + 3u >= lastInput && lastInput + 3u < inputShape[RANK - 1]) {
         tensorReadARM(inputData, inputIndex, value);
+    } else {
+        for (uint k = 0; k < 4; k++) {
+            inputIndex[RANK - 1] = lastInput + k;
+            if (isPad || inputIndex[RANK - 1] >= inputShape[RANK - 1]) {
+                value[k] = padValue;
+            } else {
+                tensorReadARM(inputData, inputIndex, value[k]);
+            }
+        }
     }
 
     tensorWriteARM(outputData, index, value);
