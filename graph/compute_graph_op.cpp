@@ -1951,6 +1951,8 @@ SpirvBinary Reverse::createSpirv(const std::shared_ptr<PipelineCache> &_pipeline
     return _pipelineCache->lookup(shaderName, {inOutType->glslType});
 }
 
+void Reverse::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * Rfft2D
  *******************************************************************************/
@@ -2145,6 +2147,8 @@ SpirvBinary Tile::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineCac
     return _pipelineCache->lookup(shaderName, {inOutType->glslType});
 }
 
+void Tile::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * Transpose
  *******************************************************************************/
@@ -2180,6 +2184,8 @@ SpirvBinary Transpose::createSpirv(const std::shared_ptr<PipelineCache> &_pipeli
 
     return _pipelineCache->lookup(shaderName, {inOutType->glslType});
 }
+
+void Transpose::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * TransposeConv2D
