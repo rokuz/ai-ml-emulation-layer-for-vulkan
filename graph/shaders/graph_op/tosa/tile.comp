@@ -13,8 +13,10 @@ layout(set = 0, binding = 0) uniform tensorARM<IN_OUT_T, RANK> outputData;
 layout(set = 1, binding = 0) uniform tensorARM<IN_OUT_T, RANK> inputData;
 
 void main() {
+    uint[RANK] shape;
+    getShape(shape, outputData)
     uint[RANK] index;
-    getDispatchIndex(outputData, index);
+    getVectorIndex(index, shape)
 
     uint[RANK] inputShape;
     getShape(inputShape, inputData);
@@ -24,8 +26,15 @@ void main() {
         inputIndex[i] = index[i] % inputShape[i];
     }
 
-    IN_OUT_T value;
-    tensorReadARM(inputData, inputIndex, value);
+    IN_OUT_T value[4];
+    if (inputIndex[RANK - 1] + 3u < inputShape[RANK - 1]) {
+        tensorReadARM(inputData, inputIndex, value);
+    } else {
+        for (uint k = 0; k < 4; k++) {
+            inputIndex[RANK - 1] = (index[RANK - 1] + k) % inputShape[RANK - 1];
+            tensorReadARM(inputData, inputIndex, value[k]);
+        }
+    }
 
     tensorWriteARM(outputData, index, value);
 }
