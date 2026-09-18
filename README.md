@@ -283,8 +283,8 @@ $env:VMEL_DISABLE_OPERATOR_FUSION="1"
 
 CONV2D over int8 with an int32 accumulator runs from workgroup shared memory: a
 workgroup loads the input window under a tile of output pixels once, together
-with the weights of an output channel group, and every invocation then convolves
-from shared memory only. The kernel is used when a tile fits into
+with the weights of up to four output channel groups, and every invocation then
+convolves from shared memory only. The kernel is used when a tile fits into
 `maxComputeSharedMemorySize` and into the workgroup limits of the device, and
 the direct kernel is kept otherwise. Set `VMEL_DISABLE_CONV_TILES` to always use
 the direct kernel.

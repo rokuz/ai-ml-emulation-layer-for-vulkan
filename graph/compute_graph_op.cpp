@@ -1005,6 +1005,8 @@ SpecConstants tileConstants(const RescaleTail *tail, const Conv2DTiles &tiles) {
         constants.resize(5, 0);
         constants.push_back(tiles.inputWords);
         constants.push_back(tiles.weightWords);
+        constants.push_back(tiles.groups);
+        constants.push_back(tiles.groups);
     }
     return constants;
 }
@@ -1120,8 +1122,8 @@ void Conv2D::getTileGroupCounts(const std::shared_ptr<TensorDescriptor> &output,
 
 bool Conv2D::getTileWords(const std::shared_ptr<TensorDescriptor> &input,
                           const std::shared_ptr<TensorDescriptor> &weights, const std::vector<int32_t> &stride,
-                          const std::vector<int32_t> &dilation, const uint32_t sharedMemoryBytes, uint32_t &inputWords,
-                          uint32_t &weightWords) {
+                          const std::vector<int32_t> &dilation, const uint32_t groups, const uint32_t sharedMemoryBytes,
+                          uint32_t &inputWords, uint32_t &weightWords) {
     if (input->getRank() != 4 || weights->getRank() != 4 || stride.size() != 2 || dilation.size() != 2 ||
         stride[0] < 1 || stride[1] < 1 || dilation[0] < 1 || dilation[1] < 1) {
         return false;
@@ -1136,8 +1138,8 @@ bool Conv2D::getTileWords(const std::shared_ptr<TensorDescriptor> &input,
                                (static_cast<uint64_t>(weightDimensions[2]) - 1) * static_cast<uint64_t>(dilation[1]) +
                                1;
     const uint64_t tileInputWords = tileHeight * tileWidth * words;
-    const uint64_t tileWeightWords =
-        4 * static_cast<uint64_t>(weightDimensions[1]) * static_cast<uint64_t>(weightDimensions[2]) * words;
+    const uint64_t tileWeightWords = 4 * static_cast<uint64_t>(groups) * static_cast<uint64_t>(weightDimensions[1]) *
+                                     static_cast<uint64_t>(weightDimensions[2]) * words;
     if ((tileInputWords + tileWeightWords) * sizeof(uint32_t) > sharedMemoryBytes) {
         return false;
     }
@@ -1155,7 +1157,7 @@ void Conv2D::cmdDispatch(VkCommandBuffer commandBuffer) {
         loader->vkCmdDispatch(commandBuffer, divideRoundUp(static_cast<uint32_t>(dimensions[2]), warpX),
                               divideRoundUp(static_cast<uint32_t>(dimensions[1]), warpY),
                               static_cast<uint32_t>(dimensions[0]) *
-                                  divideRoundUp(static_cast<uint32_t>(dimensions[3]), 4));
+                                  divideRoundUp(divideRoundUp(static_cast<uint32_t>(dimensions[3]), 4), tiles.groups));
         return;
     }
 
@@ -2575,6 +2577,12 @@ GraphPipeline::GraphPipeline(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail:
         properties.limits.maxComputeWorkGroupCount[1],
         properties.limits.maxComputeWorkGroupCount[2],
     };
+    maxComputeWorkGroupSize = {
+        properties.limits.maxComputeWorkGroupSize[0],
+        properties.limits.maxComputeWorkGroupSize[1],
+        properties.limits.maxComputeWorkGroupSize[2],
+    };
+    maxComputeWorkGroupInvocations = properties.limits.maxComputeWorkGroupInvocations;
     maxComputeSharedMemorySize = properties.limits.maxComputeSharedMemorySize;
 }
 
@@ -2810,6 +2818,7 @@ Conv2DTiles GraphPipeline::selectConv2DTiles(const std::shared_ptr<TensorDescrip
                                              const uint32_t accType, const RescaleTail *tail) {
     uint32_t tileInputWords = 0;
     uint32_t tileWeightWords = 0;
+    uint32_t tileGroups = 1;
     static const bool disableTiles = []() {
         const char *const value = std::getenv("VMEL_DISABLE_CONV_TILES");
         return value != nullptr && std::string_view(value) != "0";
@@ -2818,22 +2827,35 @@ Conv2DTiles GraphPipeline::selectConv2DTiles(const std::shared_ptr<TensorDescrip
     if (!disableTiles && input->getFormat() == VK_FORMAT_R8_SINT && weights->getFormat() == VK_FORMAT_R8_SINT &&
         accTypeVkFormat(accType) == VK_FORMAT_R32_SINT && sumFormat == VK_FORMAT_R32_SINT && output->getRank() == 4) {
         const auto &outputDimensions = output->getDimensions();
-        const uint64_t channelGroups =
-            static_cast<uint64_t>(outputDimensions[0]) * ((static_cast<uint64_t>(outputDimensions[3]) + 3) / 4);
+        constexpr uint64_t maxTileGroups = 4;
+        const uint64_t channelGroups = (static_cast<uint64_t>(outputDimensions[3]) + 3) / 4;
         uint32_t tileGroupCountX = 0;
         uint32_t tileGroupCountY = 0;
         Conv2D::getTileGroupCounts(output, tileGroupCountX, tileGroupCountY);
-        if (channelGroups > maxComputeWorkGroupCount[2] || tileGroupCountX > maxComputeWorkGroupCount[0] ||
-            tileGroupCountY > maxComputeWorkGroupCount[1] ||
-            !Conv2D::getTileWords(input, weights, stride, dilation, maxComputeSharedMemorySize, tileInputWords,
-                                  tileWeightWords)) {
+        bool fits = false;
+        for (tileGroups = static_cast<uint32_t>(channelGroups < maxTileGroups ? channelGroups : maxTileGroups);
+             tileGroups >= 1; tileGroups /= 2) {
+            const uint64_t workgroupsZ =
+                static_cast<uint64_t>(outputDimensions[0]) * ((channelGroups + tileGroups - 1) / tileGroups);
+            if (Conv2D::warpX * Conv2D::warpY * tileGroups <= maxComputeWorkGroupInvocations &&
+                tileGroups <= maxComputeWorkGroupSize[2] && workgroupsZ <= maxComputeWorkGroupCount[2] &&
+                tileGroupCountX <= maxComputeWorkGroupCount[0] && tileGroupCountY <= maxComputeWorkGroupCount[1] &&
+                Conv2D::getTileWords(input, weights, stride, dilation, tileGroups, maxComputeSharedMemorySize,
+                                     tileInputWords, tileWeightWords)) {
+                fits = true;
+                break;
+            }
+        }
+        if (!fits) {
             tileInputWords = 0;
             tileWeightWords = 0;
+            tileGroups = 1;
         }
     }
     Conv2DTiles tiles;
     tiles.inputWords = tileInputWords;
     tiles.weightWords = tileWeightWords;
+    tiles.groups = tileGroups;
     return tiles;
 }
 
