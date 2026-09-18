@@ -1023,6 +1023,7 @@ SpirvBinary Conv2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
         getTosaArithmeticTypeInfo(tail != nullptr ? tail->inputFormat : output->getFormat(), IntegerInterpretation::Signed);
     const auto *weightType = getTosaArithmeticTypeInfo(weights->getFormat(), IntegerInterpretation::Signed);
     const auto *accTypeType = getArithmeticTypeInfo(accScalarType(accType));
+    const std::string pixelsKey = "px" + std::to_string(tiles.pixels);
 
     PipelineCache::KeyList keys = {
         inType->glslType,
@@ -1032,24 +1033,30 @@ SpirvBinary Conv2D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
     };
     appendRescaleTailKeys(keys, output, tail);
 
-    const std::string_view tiledName =
-        inType->isInteger ? (tiles.dot ? tileDotShaderName : tileShaderName) : tileFloatShaderName;
+    if (tiles.inputWords != 0 && tiles.dot) {
+        keys.push_back(pixelsKey);
+        return _pipelineCache->lookup(tileDotShaderName, keys);
+    }
+
+    const std::string_view tiledName = inType->isInteger ? tileShaderName : tileFloatShaderName;
     return _pipelineCache->lookup(tiles.inputWords != 0 ? tiledName : shaderName, keys);
 }
 
-void Conv2D::getTileGroupCounts(const std::shared_ptr<TensorDescriptor> &output, uint32_t &groupCountX,
-                                uint32_t &groupCountY) {
+void Conv2D::getTileGroupCounts(const std::shared_ptr<TensorDescriptor> &output, const uint32_t pixels,
+                                uint32_t &groupCountX, uint32_t &groupCountY) {
     const auto &dimensions = output->getDimensions();
-    groupCountX = divideRoundUp(static_cast<uint32_t>(dimensions[2]), warpX);
+    groupCountX = divideRoundUp(static_cast<uint32_t>(dimensions[2]), warpX * pixels);
     groupCountY = divideRoundUp(static_cast<uint32_t>(dimensions[1]), warpY);
 }
 
 bool Conv2D::getTileWords(const std::shared_ptr<TensorDescriptor> &input,
                           const std::shared_ptr<TensorDescriptor> &weights, const std::vector<int32_t> &stride,
                           const std::vector<int32_t> &dilation, const uint32_t groups, const uint32_t sharedMemoryBytes,
-                          const uint32_t valuesPerWord, uint32_t &inputWords, uint32_t &weightWords) {
+                          const uint32_t valuesPerWord, const uint32_t pixels, uint32_t &inputWords,
+                          uint32_t &weightWords) {
     if (input->getRank() != 4 || weights->getRank() != 4 || stride.size() != 2 || dilation.size() != 2 ||
-        stride[0] < 1 || stride[1] < 1 || dilation[0] < 1 || dilation[1] < 1) {
+        stride[0] < 1 || stride[1] < 1 || dilation[0] < 1 || dilation[1] < 1 ||
+        (valuesPerWord != 1 && valuesPerWord != 4)) {
         return false;
     }
 
@@ -1060,7 +1067,7 @@ bool Conv2D::getTileWords(const std::shared_ptr<TensorDescriptor> &input,
     const uint64_t tileHeight = (warpY - 1) * static_cast<uint64_t>(stride[0]) +
                                 (static_cast<uint64_t>(weightDimensions[1]) - 1) * static_cast<uint64_t>(dilation[0]) +
                                 1;
-    const uint64_t tileWidth = (warpX - 1) * static_cast<uint64_t>(stride[1]) +
+    const uint64_t tileWidth = (warpX * static_cast<uint64_t>(pixels) - 1) * static_cast<uint64_t>(stride[1]) +
                                (static_cast<uint64_t>(weightDimensions[2]) - 1) * static_cast<uint64_t>(dilation[1]) +
                                1;
     const uint64_t tileInputWords = tileHeight * tileWidth * words;
@@ -1081,7 +1088,7 @@ void Conv2D::cmdDispatch(VkCommandBuffer commandBuffer) {
     const auto &tensor = pipelineLayout->getTensorForSet(0);
     const auto &dimensions = tensor->getDimensions();
     if (tiles.inputWords != 0) {
-        loader->vkCmdDispatch(commandBuffer, divideRoundUp(static_cast<uint32_t>(dimensions[2]), warpX),
+        loader->vkCmdDispatch(commandBuffer, divideRoundUp(static_cast<uint32_t>(dimensions[2]), warpX * tiles.pixels),
                               divideRoundUp(static_cast<uint32_t>(dimensions[1]), warpY),
                               static_cast<uint32_t>(dimensions[0]) *
                                   divideRoundUp(divideRoundUp(static_cast<uint32_t>(dimensions[3]), 4), tiles.groups));
@@ -2599,6 +2606,7 @@ Conv2DTiles GraphPipeline::selectConv2DTiles(const std::shared_ptr<TensorDescrip
     uint32_t tileInputWords = 0;
     uint32_t tileWeightWords = 0;
     uint32_t tileGroups = 1;
+    uint32_t tilePixels = 1;
     static const bool disableTiles = []() {
         const char *const value = std::getenv("VMEL_DISABLE_CONV_TILES");
         return value != nullptr && std::string_view(value) != "0";
@@ -2613,20 +2621,32 @@ Conv2DTiles GraphPipeline::selectConv2DTiles(const std::shared_ptr<TensorDescrip
         const auto &outputDimensions = output->getDimensions();
         constexpr uint64_t maxTileGroups = 4;
         const uint64_t channelGroups = (static_cast<uint64_t>(outputDimensions[3]) + 3) / 4;
-        uint32_t tileGroupCountX = 0;
-        uint32_t tileGroupCountY = 0;
-        Conv2D::getTileGroupCounts(output, tileGroupCountX, tileGroupCountY);
+        const uint32_t wantedPixels = int8Tiles && hasIntegerDotProduct() ? 2u : 1u;
         bool fits = false;
-        for (tileGroups = static_cast<uint32_t>(channelGroups < maxTileGroups ? channelGroups : maxTileGroups);
-             tileGroups >= 1; tileGroups /= 2) {
-            const uint64_t workgroupsZ =
-                static_cast<uint64_t>(outputDimensions[0]) * ((channelGroups + tileGroups - 1) / tileGroups);
-            if (Conv2D::warpX * Conv2D::warpY * tileGroups <= maxComputeWorkGroupInvocations &&
-                tileGroups <= maxComputeWorkGroupSize[2] && workgroupsZ <= maxComputeWorkGroupCount[2] &&
-                tileGroupCountX <= maxComputeWorkGroupCount[0] && tileGroupCountY <= maxComputeWorkGroupCount[1] &&
-                Conv2D::getTileWords(input, weights, stride, dilation, tileGroups, maxComputeSharedMemorySize,
-                                     int8Tiles ? 4u : 1u, tileInputWords, tileWeightWords)) {
-                fits = true;
+        for (uint32_t pixelsTry = wantedPixels; !fits; pixelsTry /= 2) {
+            uint32_t tileGroupCountX = 0;
+            uint32_t tileGroupCountY = 0;
+            Conv2D::getTileGroupCounts(output, pixelsTry, tileGroupCountX, tileGroupCountY);
+            for (uint32_t groupsTry =
+                     static_cast<uint32_t>(channelGroups < maxTileGroups ? channelGroups : maxTileGroups);
+                 groupsTry >= 1; groupsTry /= 2) {
+                const uint64_t workgroupsZ =
+                    static_cast<uint64_t>(outputDimensions[0]) * ((channelGroups + groupsTry - 1) / groupsTry);
+                if (Conv2D::warpX * Conv2D::warpY * groupsTry <= maxComputeWorkGroupInvocations &&
+                    groupsTry <= maxComputeWorkGroupSize[2] && workgroupsZ <= maxComputeWorkGroupCount[2] &&
+                    tileGroupCountX <= maxComputeWorkGroupCount[0] && tileGroupCountY <= maxComputeWorkGroupCount[1] &&
+                    Conv2D::getTileWords(input, weights, stride, dilation, groupsTry, maxComputeSharedMemorySize,
+                                         int8Tiles ? 4u : 1u, pixelsTry, tileInputWords, tileWeightWords)) {
+                    tileGroups = groupsTry;
+                    tilePixels = pixelsTry;
+                    fits = true;
+                    break;
+                }
+                if (groupsTry == 1u) {
+                    break;
+                }
+            }
+            if (fits || pixelsTry == 1u) {
                 break;
             }
         }
@@ -2634,12 +2654,14 @@ Conv2DTiles GraphPipeline::selectConv2DTiles(const std::shared_ptr<TensorDescrip
             tileInputWords = 0;
             tileWeightWords = 0;
             tileGroups = 1;
+            tilePixels = 1;
         }
     }
     Conv2DTiles tiles;
     tiles.inputWords = tileInputWords;
     tiles.weightWords = tileWeightWords;
     tiles.groups = tileGroups;
+    tiles.pixels = tilePixels;
     tiles.dot = tileInputWords != 0 && int8Tiles && hasIntegerDotProduct();
     return tiles;
 }
