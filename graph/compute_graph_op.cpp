@@ -1441,6 +1441,8 @@ SpirvBinary ElementwiseBinary::createSpirv(const std::shared_ptr<PipelineCache> 
                                   });
 }
 
+void ElementwiseBinary::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+
 /*******************************************************************************
  * ElementwiseUnary
  *******************************************************************************/
@@ -1482,6 +1484,8 @@ SpirvBinary ElementwiseUnary::createSpirv(const std::shared_ptr<PipelineCache> &
                                       {"%in_out_t_comp%", inOutType->compType},
                                   });
 }
+
+void ElementwiseUnary::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
 
 /*******************************************************************************
  * Fft2D
