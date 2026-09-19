@@ -39,7 +39,11 @@ void main() {
     STORAGE_T outStorage[4];
     for (uint k = 0; k < 4; k++) {
         COMP_T value = DECODE_STORAGE_TO_COMP(valueRaw[k], TYPE_IN_OUT, COMP_T);
+#if IS_FLOAT(TYPE_IN_OUT) || IS_REDUCED_FLOAT(TYPE_IN_OUT)
+        COMP_T res = COMP_T(pushConstants.inputZeroPoint) - value + COMP_T(pushConstants.outputZeroPoint);
+#else
         COMP_T res = COMP_T(PUSH_INT(0, inputZeroPoint)) - value + COMP_T(PUSH_INT(1, outputZeroPoint));
+#endif
 
 #if IS_BFLOAT(TYPE_IN_OUT)
         COMP_T outValue = isnan(float(value)) ? value : (isinf(float(value)) ? COMP_T(-value) : res);
