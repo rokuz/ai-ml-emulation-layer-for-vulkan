@@ -47,8 +47,11 @@ void main() {
     const bool tiled = tileRows > 0u;
     const uint rowBlock = tiled ? tileRows : shape[1];
 
-    DOUBLE sumReal = 0.0;
-    DOUBLE sumImag = 0.0;
+    // Use Kahan summation to counteract cumulative errors in float summation
+    float sumReal = 0.0;
+    float sumImag = 0.0;
+    precise float errorReal = 0.0;
+    precise float errorImag = 0.0;
 
     for (uint blockY = 0; blockY < shape[1]; blockY += rowBlock) {
         const uint rows = min(rowBlock, shape[1] - blockY);
@@ -92,14 +95,21 @@ void main() {
 
                 vec4 ixs = vec4(ix, ix + 1, ix + 2, ix + 3);
                 vec4 angles = pushConstants.signValue * 2.0f * PI * (rowAngle + ixs * ox / shape[2]);
-                sumReal += dot(valueRealVec, cos(angles)) + dot(valueImagVec, sin(angles));
-                sumImag += -dot(valueRealVec, sin(angles)) + dot(valueImagVec, cos(angles));
+                float termReal = dot(valueRealVec, cos(angles)) + dot(valueImagVec, sin(angles)) - errorReal;
+                precise float sumNewReal = sumReal + termReal;
+                errorReal = (sumNewReal - sumReal) - termReal;
+                sumReal = sumNewReal;
+
+                float termImag = -dot(valueRealVec, sin(angles)) + dot(valueImagVec, cos(angles)) - errorImag;
+                precise float sumNewImag = sumImag + termImag;
+                errorImag = (sumNewImag - sumImag) - termImag;
+                sumImag = sumNewImag;
             }
         }
     }
 
     if (write) {
-        tensorWriteARM(outputRealData, index, float(sumReal));
-        tensorWriteARM(outputImagData, index, float(sumImag));
+        tensorWriteARM(outputRealData, index, sumReal);
+        tensorWriteARM(outputImagData, index, sumImag);
     }
 }
