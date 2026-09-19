@@ -431,8 +431,8 @@ std::optional<GraphTosaExtInst::FusedRescale> GraphTosaExtInst::findRescaleTail(
         const char *const value = std::getenv("VMEL_DISABLE_OPERATOR_FUSION");
         return value != nullptr && std::string_view(value) != "0";
     }();
-    if (disabled || inputFormat != VK_FORMAT_R8_SINT || weightFormat != VK_FORMAT_R8_SINT ||
-        sumType != mlsdk::el::utils::ScalarType::Int32) {
+    if (disabled || !context.pipeline().fitsRescaleTail() || inputFormat != VK_FORMAT_R8_SINT ||
+        weightFormat != VK_FORMAT_R8_SINT || sumType != mlsdk::el::utils::ScalarType::Int32) {
         return std::nullopt;
     }
 
