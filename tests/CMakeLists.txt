@@ -74,3 +74,27 @@ mlel_add_test(
     PROPERTIES
         ${MLEL_UNIT_TEST_PROPERTIES}
 )
+
+add_executable(mlel_opsuite opsuite/opsuite_runner.cpp)
+
+target_link_libraries(mlel_opsuite PRIVATE mlelutilities)
+
+find_package(Python3 COMPONENTS Interpreter)
+
+if(Python3_Interpreter_FOUND AND NOT ANDROID)
+    add_test(
+        NAME mlel_opsuite_self_check
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/opsuite/verify.py
+                --runner $<TARGET_FILE:mlel_opsuite>
+                --out ${CMAKE_CURRENT_BINARY_DIR}/opsuite
+                --self-check
+                --suites operators,fusion,fusion_order,conv_wide,conv_shapes,conv_zero_points,conv_tiles,conv_float,tconv_taps,resize,concat,table,pool,fft)
+    set(MLEL_OPSUITE_ENVIRONMENT
+        VK_LAYER_PATH=path_list_append:$<TARGET_FILE_DIR:VkLayer_Graph>
+        VK_LAYER_PATH=path_list_append:$<TARGET_FILE_DIR:VkLayer_Tensor>
+        LD_LIBRARY_PATH=path_list_append:$<TARGET_FILE_DIR:VkLayer_Graph>
+        LD_LIBRARY_PATH=path_list_append:$<TARGET_FILE_DIR:VkLayer_Tensor>)
+    set_tests_properties(mlel_opsuite_self_check PROPERTIES
+        LABELS opsuite
+        ENVIRONMENT_MODIFICATION "${MLEL_OPSUITE_ENVIRONMENT}")
+endif()
