@@ -28,12 +28,13 @@ void main() {
     const uint planeValues = shape[1] * shape[2];
     const uint tileBase = gl_GlobalInvocationID.x - gl_LocalInvocationID.x +
                           gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x;
-    if (tileBase >= shape[0] * planeValues) {
+    const uint totalValues = shape[0] * planeValues;
+    if (tileBase >= totalValues) {
         return;
     }
 
     const uint offset = tileBase + gl_LocalInvocationID.x;
-    const bool write = offset < shape[0] * planeValues;
+    const bool write = offset < totalValues;
     const uint element = write ? offset : tileBase;
 
     uint[3] index = uint[](element / planeValues, element / shape[2] % shape[1], element % shape[2]);
@@ -43,11 +44,14 @@ void main() {
     uint ox = index[2];
 
     const uint rowGroups = (shape[2] + 3u) / 4u;
-    const uint tileRows = planeValues % gl_WorkGroupSize.x == 0u ? TILE_GROUPS / rowGroups : 0u;
+    const uint tileLast = min(tileBase + gl_WorkGroupSize.x, totalValues) - 1u;
+    const uint tileRows = tileBase / planeValues == tileLast / planeValues ? TILE_GROUPS / rowGroups : 0u;
     const bool tiled = tileRows > 0u;
     const uint rowBlock = tiled ? tileRows : shape[1];
+    if (!write && !tiled) {
+        return;
+    }
 
-    // Use Kahan summation to counteract cumulative errors in float summation
     float sumReal = 0.0;
     float sumImag = 0.0;
     precise float errorReal = 0.0;
