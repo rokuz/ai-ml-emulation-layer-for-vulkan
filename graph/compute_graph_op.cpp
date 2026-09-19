@@ -1515,9 +1515,11 @@ void ElementwiseUnary::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchV
 Fft2D::Fft2D(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> &_loader, VkDevice _device,
              const std::shared_ptr<PipelineCache> &_pipelineCache, const std::shared_ptr<TensorDescriptor> &_inputReal,
              const std::shared_ptr<TensorDescriptor> &_inputImag, const std::shared_ptr<TensorDescriptor> &_outputReal,
-             const std::shared_ptr<TensorDescriptor> &_outputImag, const bool _inverse, const std::string &debugName)
+             const std::shared_ptr<TensorDescriptor> &_outputImag, const bool _inverse, const std::string &debugName,
+             const uint32_t _tileGroups)
     : ComputePipeline(_loader, _device, createDescriptorMap(_inputReal, _inputImag, _outputReal, _outputImag),
-                      {&pushConstant, sizeof(pushConstant)}, _pipelineCache, createSpirv(_pipelineCache), debugName),
+                      {&pushConstant, sizeof(pushConstant)}, _pipelineCache, createSpirv(_pipelineCache), debugName,
+                      {_tileGroups}),
       pushConstant{createPushConstant(_inverse)} {}
 
 Fft2D::PushConstant Fft2D::createPushConstant(const bool inverse) const {
@@ -2174,9 +2176,10 @@ void Reverse::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(com
 Rfft2D::Rfft2D(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> &_loader, VkDevice _device,
                const std::shared_ptr<PipelineCache> &_pipelineCache, const std::shared_ptr<TensorDescriptor> &_input,
                const std::shared_ptr<TensorDescriptor> &_outputReal,
-               const std::shared_ptr<TensorDescriptor> &_outputImag, const std::string &debugName)
+               const std::shared_ptr<TensorDescriptor> &_outputImag, const std::string &debugName,
+               const uint32_t _tileGroups)
     : ComputePipeline(_loader, _device, createDescriptorMap(_input, _outputReal, _outputImag), {}, _pipelineCache,
-                      createSpirv(_pipelineCache), debugName) {}
+                      createSpirv(_pipelineCache), debugName, {_tileGroups}) {}
 
 DescriptorMap Rfft2D::createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input,
                                           const std::shared_ptr<TensorDescriptor> &outputReal,
@@ -2972,6 +2975,20 @@ Conv2DTiles GraphPipeline::selectConv2DTiles(const std::shared_ptr<TensorDescrip
     return tiles;
 }
 
+uint32_t GraphPipeline::selectFftTileGroups(const std::shared_ptr<TensorDescriptor> &input,
+                                            const uint32_t tensors) const {
+    constexpr uint32_t maxTileBytes = 8192;
+    const auto &dimensions = input->getDimensions();
+    const uint64_t rowGroups = (static_cast<uint64_t>(dimensions[2]) + 3) / 4;
+    const uint64_t rows =
+        std::min(maxComputeSharedMemorySize, maxTileBytes) / (rowGroups * 4 * sizeof(float) * tensors);
+    if (rows == 0) {
+        return 1;
+    }
+
+    return static_cast<uint32_t>(std::min(rows, static_cast<uint64_t>(dimensions[1])) * rowGroups);
+}
+
 void GraphPipeline::makeConv2D(const std::shared_ptr<TensorDescriptor> &input,
                                const std::shared_ptr<TensorDescriptor> &output,
                                const std::shared_ptr<TensorDescriptor> &weights,
@@ -3034,7 +3051,8 @@ void GraphPipeline::makeFft2D(const std::shared_ptr<TensorDescriptor> &inputReal
                               const std::shared_ptr<TensorDescriptor> &outputReal,
                               const std::shared_ptr<TensorDescriptor> &outputImag, const bool inverse,
                               const std::string &debugName) {
-    makePipeline<Fft2D>(inputReal, inputImag, outputReal, outputImag, inverse, debugName);
+    makePipeline<Fft2D>(inputReal, inputImag, outputReal, outputImag, inverse, debugName,
+                        selectFftTileGroups(inputReal, 2));
 }
 
 void GraphPipeline::makeFloor(const std::shared_ptr<TensorDescriptor> &input1,
@@ -3251,7 +3269,7 @@ void GraphPipeline::makeReverse(const std::shared_ptr<TensorDescriptor> &input,
 void GraphPipeline::makeRfft2D(const std::shared_ptr<TensorDescriptor> &input,
                                const std::shared_ptr<TensorDescriptor> &outputReal,
                                const std::shared_ptr<TensorDescriptor> &outputImag, const std::string &debugName) {
-    makePipeline<Rfft2D>(input, outputReal, outputImag, debugName);
+    makePipeline<Rfft2D>(input, outputReal, outputImag, debugName, selectFftTileGroups(input, 1));
 }
 
 void GraphPipeline::makeRsqrt(const std::shared_ptr<TensorDescriptor> &input1,

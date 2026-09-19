@@ -667,7 +667,8 @@ class Fft2D : public ComputePipeline {
     Fft2D(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> &_loader, VkDevice _device,
           const std::shared_ptr<PipelineCache> &_pipelineCache, const std::shared_ptr<TensorDescriptor> &_inputReal,
           const std::shared_ptr<TensorDescriptor> &_inputImag, const std::shared_ptr<TensorDescriptor> &_outputReal,
-          const std::shared_ptr<TensorDescriptor> &_outputImag, bool _inverse, const std::string &debugName);
+          const std::shared_ptr<TensorDescriptor> &_outputImag, bool _inverse, const std::string &debugName,
+          uint32_t _tileGroups);
 
   private:
     struct PushConstant {
@@ -1048,7 +1049,7 @@ class Rfft2D : public ComputePipeline {
     Rfft2D(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> &_loader, VkDevice _device,
            const std::shared_ptr<PipelineCache> &_pipelineCache, const std::shared_ptr<TensorDescriptor> &_input,
            const std::shared_ptr<TensorDescriptor> &_outputReal, const std::shared_ptr<TensorDescriptor> &_outputImag,
-           const std::string &debugName);
+           const std::string &debugName, uint32_t _tileGroups);
 
   private:
     DescriptorMap createDescriptorMap(const std::shared_ptr<TensorDescriptor> &input,
@@ -1627,6 +1628,8 @@ class GraphPipeline {
                                   const std::shared_ptr<TensorDescriptor> &output,
                                   const std::shared_ptr<TensorDescriptor> &weights, const std::vector<int32_t> &stride,
                                   const std::vector<int32_t> &dilation, uint32_t accType, const RescaleTail *tail);
+
+    uint32_t selectFftTileGroups(const std::shared_ptr<TensorDescriptor> &input, uint32_t tensors) const;
 
     bool hasIntegerDotProduct();
 

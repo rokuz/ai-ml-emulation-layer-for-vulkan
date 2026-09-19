@@ -14,40 +14,92 @@ layout(set = 1, binding = 0) uniform tensorARM<float, 3> outputImagData;
 layout(set = 2, binding = 0) uniform tensorARM<float, 3> inputRealData;
 layout(set = 3, binding = 0) uniform tensorARM<float, 3> inputImagData;
 
-void main() {
-    uint[3] index;
-    getDispatchIndex3(outputRealData, index);
+layout(constant_id = 0) const uint TILE_GROUPS = 1;
+shared vec4 tileReal[TILE_GROUPS];
+shared vec4 tileImag[TILE_GROUPS];
 
+void main() {
     const uint[3] shape = {
         tensorSizeARM(outputRealData, 0),
         tensorSizeARM(outputRealData, 1),
         tensorSizeARM(outputRealData, 2),
     };
 
+    const uint planeValues = shape[1] * shape[2];
+    const uint tileBase = gl_GlobalInvocationID.x - gl_LocalInvocationID.x +
+                          gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+    if (tileBase >= shape[0] * planeValues) {
+        return;
+    }
+
+    const uint offset = tileBase + gl_LocalInvocationID.x;
+    const bool write = offset < shape[0] * planeValues;
+    const uint element = write ? offset : tileBase;
+
+    uint[3] index = uint[](element / planeValues, element / shape[2] % shape[1], element % shape[2]);
+
     uint on = index[0];
     uint oy = index[1];
     uint ox = index[2];
 
+    const uint rowGroups = (shape[2] + 3u) / 4u;
+    const uint tileRows = planeValues % gl_WorkGroupSize.x == 0u ? TILE_GROUPS / rowGroups : 0u;
+    const bool tiled = tileRows > 0u;
+    const uint rowBlock = tiled ? tileRows : shape[1];
+
     DOUBLE sumReal = 0.0;
     DOUBLE sumImag = 0.0;
 
-    for (uint iy = 0; iy < shape[1]; iy++) {
-        for (uint ix = 0; ix < shape[2]; ix += 4) {
-            vec4 ixs = vec4(ix, ix + 1, ix + 2, ix + 3);
-            float valueReal[4];
-            tensorReadARM(inputRealData, uint[](on, iy, ix), valueReal);
-            vec4 valueRealVec = vec4(valueReal[0], valueReal[1], valueReal[2], valueReal[3]);
+    for (uint blockY = 0; blockY < shape[1]; blockY += rowBlock) {
+        const uint rows = min(rowBlock, shape[1] - blockY);
 
-            float valueImag[4];
-            tensorReadARM(inputImagData, uint[](on, iy, ix), valueImag);
-            vec4 valueImagVec = vec4(valueImag[0], valueImag[1], valueImag[2], valueImag[3]);
+        if (tiled) {
+            barrier();
+            for (uint group = gl_LocalInvocationID.x; group < rows * rowGroups; group += gl_WorkGroupSize.x) {
+                const uint iy = blockY + group / rowGroups;
+                const uint ix = group % rowGroups * 4u;
 
-            vec4 angles = pushConstants.signValue * 2.0f * PI * (float(iy * oy) / shape[1] + ixs * ox / shape[2]);
-            sumReal += dot(valueRealVec, cos(angles)) + dot(valueImagVec, sin(angles));
-            sumImag += -dot(valueRealVec, sin(angles)) + dot(valueImagVec, cos(angles));
+                float valueReal[4];
+                tensorReadARM(inputRealData, uint[](on, iy, ix), valueReal);
+                tileReal[group] = vec4(valueReal[0], valueReal[1], valueReal[2], valueReal[3]);
+
+                float valueImag[4];
+                tensorReadARM(inputImagData, uint[](on, iy, ix), valueImag);
+                tileImag[group] = vec4(valueImag[0], valueImag[1], valueImag[2], valueImag[3]);
+            }
+            barrier();
+        }
+
+        uint group = 0;
+        for (uint iy = blockY; iy < blockY + rows; iy++) {
+            const float rowAngle = float(iy * oy) / shape[1];
+
+            for (uint ix = 0; ix < shape[2]; ix += 4, group++) {
+                vec4 valueRealVec;
+                vec4 valueImagVec;
+                if (tiled) {
+                    valueRealVec = tileReal[group];
+                    valueImagVec = tileImag[group];
+                } else {
+                    float valueReal[4];
+                    tensorReadARM(inputRealData, uint[](on, iy, ix), valueReal);
+                    valueRealVec = vec4(valueReal[0], valueReal[1], valueReal[2], valueReal[3]);
+
+                    float valueImag[4];
+                    tensorReadARM(inputImagData, uint[](on, iy, ix), valueImag);
+                    valueImagVec = vec4(valueImag[0], valueImag[1], valueImag[2], valueImag[3]);
+                }
+
+                vec4 ixs = vec4(ix, ix + 1, ix + 2, ix + 3);
+                vec4 angles = pushConstants.signValue * 2.0f * PI * (rowAngle + ixs * ox / shape[2]);
+                sumReal += dot(valueRealVec, cos(angles)) + dot(valueImagVec, sin(angles));
+                sumImag += -dot(valueRealVec, sin(angles)) + dot(valueImagVec, cos(angles));
+            }
         }
     }
 
-    tensorWriteARM(outputRealData, index, float(sumReal));
-    tensorWriteARM(outputImagData, index, float(sumImag));
+    if (write) {
+        tensorWriteARM(outputRealData, index, float(sumReal));
+        tensorWriteARM(outputImagData, index, float(sumImag));
+    }
 }
