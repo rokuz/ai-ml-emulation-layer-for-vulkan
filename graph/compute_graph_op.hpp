@@ -234,6 +234,7 @@ class ComputePipeline : public ComputePipelineBase {
     void connectPipelines();
     virtual void cmdDispatch(VkCommandBuffer commandBuffer);
     void cmdDispatchVector(VkCommandBuffer commandBuffer, uint32_t set, uint32_t valuesPerInvocation);
+    void cmdDispatchIntegerVector(VkCommandBuffer commandBuffer);
 
     std::shared_ptr<VULKAN_HPP_NAMESPACE::detail::DispatchLoaderDynamic> loader;
     VkDevice device;
@@ -1521,6 +1522,8 @@ class GraphPipeline {
     void makeReduceSum(const std::shared_ptr<TensorDescriptor> &input, const std::shared_ptr<TensorDescriptor> &output,
                        uint32_t axis, const std::string &debugName);
 
+    bool fitsRescaleTail() const;
+
     void makeRescale(const std::shared_ptr<TensorDescriptor> &input, const std::shared_ptr<TensorDescriptor> &output,
                      int32_t inputZeroPoint, int32_t outputZeroPoint,
                      const std::shared_ptr<TensorDescriptor> &multiplier,
@@ -1632,6 +1635,7 @@ class GraphPipeline {
     std::array<uint32_t, 3> maxComputeWorkGroupSize;
     uint32_t maxComputeWorkGroupInvocations;
     uint32_t maxComputeSharedMemorySize;
+    uint32_t maxBoundDescriptorSets;
 
     std::shared_ptr<PipelineCache> pipelineCache;
     std::vector<std::shared_ptr<ComputePipelineBase>> pipelines;
