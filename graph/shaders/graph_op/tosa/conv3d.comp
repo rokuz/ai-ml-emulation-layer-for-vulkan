@@ -38,6 +38,93 @@ layout(set = 1, binding = 0) uniform tensorARM<IN_T, 5> inputData;         // [N
 layout(set = 2, binding = 0) uniform tensorARM<WEIGHT_T, 5> weightsData;   // [OC, KD, KH, KW, IC]
 layout(set = 3, binding = 0) uniform tensorARM<OUT_T, 1> biasesData;       // [BC]
 
+#if IS_FLOAT(TYPE_IN) || IS_REDUCED_FLOAT(TYPE_IN)
+void main() {
+    const int dilation0 = PUSH_INT(11, dilation[0]);
+    const int dilation1 = PUSH_INT(12, dilation[1]);
+    const int dilation2 = PUSH_INT(13, dilation[2]);
+
+    uint[5] index;
+    getDispatchIndex5(outputData, index);
+
+    ACC_T acc = ACC_T(0);
+
+    uint n = index[0];
+    uint od = index[1];
+    uint oy = index[2];
+    uint ox = index[3];
+    uint oc = index[4];
+
+    int id = int(od) * PUSH_INT(8, stride[0]) - PUSH_INT(2, pad[0]);
+    int iy = int(oy) * PUSH_INT(9, stride[1]) - PUSH_INT(4, pad[2]);
+    int ix = int(ox) * PUSH_INT(10, stride[2]) - PUSH_INT(6, pad[4]);
+
+    int KD = int(tensorSizeARM(weightsData, 1));
+    int KH = int(tensorSizeARM(weightsData, 2));
+    int KW = int(tensorSizeARM(weightsData, 3));
+    int IC = int(tensorSizeARM(weightsData, 4));
+
+    int ID = int(tensorSizeARM(inputData, 1));
+    int IH = int(tensorSizeARM(inputData, 2));
+    int IW = int(tensorSizeARM(inputData, 3));
+
+    int dStart = id;
+    int kdStart = 0;
+    if (dStart < 0) {
+        int delta = -dStart;
+        kdStart = (delta + dilation0 - 1) / dilation0;
+        dStart = id + kdStart * dilation0;
+    }
+
+    int yStart = iy;
+    int kyStart = 0;
+    if (yStart < 0) {
+        int delta = -yStart;
+        kyStart = (delta + dilation1 - 1) / dilation1;
+        yStart = iy + kyStart * dilation1;
+    }
+
+    int xStart = ix;
+    int kxStart = 0;
+    if (xStart < 0) {
+        int delta = -xStart;
+        kxStart = (delta + dilation2 - 1) / dilation2;
+        xStart = ix + kxStart * dilation2;
+    }
+
+    for (int d = dStart, kd = kdStart; kd < KD && d < ID; ++kd, d += dilation0) {
+        for (int y = yStart, ky = kyStart; ky < KH && y < IH; ++ky, y += dilation1) {
+            for (int x = xStart, kx = kxStart; kx < KW && x < IW; ++kx, x += dilation2) {
+                for (int ic = 0; ic < IC; ++ic) {
+                    IN_T inputValue;
+                    tensorReadARM(inputData, uint[](n, uint(d), uint(y), uint(x), uint(ic)), inputValue);
+
+                    WEIGHT_T weightValue;
+                    tensorReadARM(weightsData, uint[](oc, uint(kd), uint(ky), uint(kx), uint(ic)), weightValue);
+
+                    ACC_T val = CONV_TO_ACC_INPUT(inputValue) - ACC_T(PUSH_INT(0, inputZeroPoint));
+                    ACC_T wt = CONV_TO_ACC_WEIGHT(weightValue) - ACC_T(PUSH_INT(1, weightZeroPoint));
+                    acc += val * wt;
+                }
+            }
+        }
+    }
+
+    OUT_T bias;
+    tensorReadARM(biasesData, uint[](tensorSizeARM(biasesData, 0) == 1 ? 0 : oc), bias);
+    ACC_T bias_acc = CONV_TO_ACC_BIAS(bias);
+    ACC_T sum = bias_acc + acc;
+    OUT_T outVal = CONV_ACC_TO_OUT(sum);
+
+#if RESCALE_TAIL
+    TAIL_OUT_T tailValue;
+    rescaleTail(outVal, oc, tailValue)
+    tensorWriteARM(outputData, index, tailValue);
+#else
+    tensorWriteARM(outputData, index, outVal);
+#endif
+}
+#else
 void main() {
     const int dilation0 = PUSH_INT(11, dilation[0]);
     const int dilation1 = PUSH_INT(12, dilation[1]);
@@ -149,3 +236,4 @@ void main() {
     tensorWriteARM(outputData, index, outVal);
 #endif
 }
+#endif

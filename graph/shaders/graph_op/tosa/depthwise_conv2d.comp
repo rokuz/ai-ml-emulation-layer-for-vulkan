@@ -38,6 +38,62 @@ layout(set = 1, binding = 0) uniform tensorARM<IN_T, 4> inputData;         // [N
 layout(set = 2, binding = 0) uniform tensorARM<WEIGHT_T, 4> weightsData;   // [KH, KW, C, M]
 layout(set = 3, binding = 0) uniform tensorARM<OUT_T, 1> biasesData;       // [BC]
 
+#if IS_FLOAT(TYPE_IN) || IS_REDUCED_FLOAT(TYPE_IN)
+void main() {
+    uint[4] index;
+    getDispatchIndex4(outputData, index);
+
+    const uint n = index[0];
+    const uint oy = index[1];
+    const uint ox = index[2];
+    const uint ocm = index[3];
+    const uint c = ocm / tensorSizeARM(weightsData, 3);
+    const uint m = ocm % tensorSizeARM(weightsData, 3);
+
+    const uint iy = oy * PUSH_INT(6, stride[0]) - PUSH_INT(2, pad[0]);
+    const uint ix = ox * PUSH_INT(7, stride[1]) - PUSH_INT(4, pad[2]);
+
+    ACC_T acc = ACC_T(0);
+
+    for (uint ky = 0; ky < tensorSizeARM(weightsData, 0); ky++) {
+        for (uint kx = 0; kx < tensorSizeARM(weightsData, 1); kx++) {
+            const uint y = iy + ky * PUSH_INT(8, dilation[0]);
+            const uint x = ix + kx * PUSH_INT(9, dilation[1]);
+
+            if (y < tensorSizeARM(inputData, 1) && x < tensorSizeARM(inputData, 2)) {
+                IN_T tempValue;
+                uint index[] = {n, y, x, c};
+                tensorReadARM(inputData, index, tempValue);
+                ACC_T value = CONV_TO_ACC_INPUT(tempValue);
+
+                WEIGHT_T tempWeight;
+                uint weightIndex[] = {ky, kx, c, m};
+                tensorReadARM(weightsData, weightIndex, tempWeight);
+                ACC_T weight = CONV_TO_ACC_WEIGHT(tempWeight);
+
+                ACC_T outValue = ACC_T(value) - ACC_T(PUSH_INT(0, inputZeroPoint));
+                ACC_T outWeight = ACC_T(weight) - ACC_T(PUSH_INT(1, weightZeroPoint));
+
+                acc += outValue * outWeight;
+            }
+        }
+    }
+
+    OUT_T bias;
+    tensorReadARM(biasesData, uint[](tensorSizeARM(biasesData, 0) == 1 ? 0 : ocm), bias);
+    ACC_T bias_acc = CONV_TO_ACC_BIAS(bias);
+    ACC_T sum = bias_acc + acc;
+    OUT_T outVal = CONV_ACC_TO_OUT(sum);
+
+#if RESCALE_TAIL
+    TAIL_OUT_T tailValue;
+    rescaleTail(outVal, ocm, tailValue)
+    tensorWriteARM(outputData, index, tailValue);
+#else
+    tensorWriteARM(outputData, index, outVal);
+#endif
+}
+#else
 void main() {
     uint[4] shape = uint[](tensorSizeARM(outputData, 0), tensorSizeARM(outputData, 1),
                           tensorSizeARM(outputData, 2), tensorSizeARM(outputData, 3));
@@ -107,3 +163,4 @@ void main() {
     tensorWriteARM(outputData, index, outVal);
 #endif
 }
+#endif

@@ -587,6 +587,11 @@ void ComputePipeline::cmdDispatchVector(VkCommandBuffer commandBuffer, const uin
     loader->vkCmdDispatch(commandBuffer, groupCount, groupCount, 1);
 }
 
+void ComputePipeline::cmdDispatchIntegerVector(VkCommandBuffer commandBuffer) {
+    const auto *inType = getFormatInfo(pipelineLayout->getTensorForSet(1)->getFormat());
+    cmdDispatchVector(commandBuffer, 0, inType->isInteger ? 4u : 1u);
+}
+
 VkPipeline ComputePipeline::createComputePipeline(const SpecConstants &_constants) const {
     static const bool specialize = []() {
         const char *const value = std::getenv("VMEL_DISABLE_SPECIALIZATION");
@@ -1306,7 +1311,7 @@ SpirvBinary Conv3D::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
     return _pipelineCache->lookup(shaderName, keys, replacements);
 }
 
-void Conv3D::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+void Conv3D::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchIntegerVector(commandBuffer); }
 
 /*******************************************************************************
  * DepthwiseConv2D
@@ -1404,7 +1409,7 @@ SpirvBinary DepthwiseConv2D::createSpirv(const std::shared_ptr<PipelineCache> &_
     return _pipelineCache->lookup(shaderName, keys, replacements);
 }
 
-void DepthwiseConv2D::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchVector(commandBuffer, 0, 4); }
+void DepthwiseConv2D::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchIntegerVector(commandBuffer); }
 
 /*******************************************************************************
  * ElementwiseBinary
@@ -1654,10 +1659,7 @@ SpirvBinary Matmul::createSpirv(const std::shared_ptr<PipelineCache> &_pipelineC
     return _pipelineCache->lookup(shaderName, keys, replacements);
 }
 
-void Matmul::cmdDispatch(VkCommandBuffer commandBuffer) {
-    const auto *inType = getFormatInfo(pipelineLayout->getTensorForSet(1)->getFormat());
-    cmdDispatchVector(commandBuffer, 0, inType->isInteger ? 4u : 1u);
-}
+void Matmul::cmdDispatch(VkCommandBuffer commandBuffer) { cmdDispatchIntegerVector(commandBuffer); }
 
 /*******************************************************************************
  * MaxPool2D
@@ -2661,6 +2663,7 @@ GraphPipeline::GraphPipeline(const std::shared_ptr<VULKAN_HPP_NAMESPACE::detail:
     };
     maxComputeWorkGroupInvocations = properties.limits.maxComputeWorkGroupInvocations;
     maxComputeSharedMemorySize = properties.limits.maxComputeSharedMemorySize;
+    maxBoundDescriptorSets = properties.limits.maxBoundDescriptorSets;
 }
 
 GraphPipeline::~GraphPipeline() {
@@ -2710,6 +2713,11 @@ ComputeDescriptorSetMap GraphPipeline::makeConstantsDescriptorSets() const {
     }
 
     return getComputeDescriptorSetMap(filter);
+}
+
+bool GraphPipeline::fitsRescaleTail() const {
+    constexpr uint32_t rescaleTailDescriptorSets = 6;
+    return maxBoundDescriptorSets >= rescaleTailDescriptorSets;
 }
 
 bool GraphPipeline::hasIntegerDotProduct() {
