@@ -317,7 +317,7 @@ bool GraphExtInstContext::isProduced(const uint32_t id) const {
         return true;
     default: {
         const auto it = tensorMap.find(id);
-        return it != tensorMap.end() && it->second[0] != nullptr;
+        return it != tensorMap.end() && it->second[0] != nullptr && it->second[0]->getPipeline() != nullptr;
     }
     }
 }
