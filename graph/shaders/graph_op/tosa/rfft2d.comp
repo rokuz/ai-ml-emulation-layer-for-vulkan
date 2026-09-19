@@ -21,12 +21,13 @@ void main() {
     const uint planeValues = H * OW;
     const uint tileBase = gl_GlobalInvocationID.x - gl_LocalInvocationID.x +
                           gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x;
-    if (tileBase >= N * planeValues) {
+    const uint totalValues = N * planeValues;
+    if (tileBase >= totalValues) {
         return;
     }
 
     const uint offset = tileBase + gl_LocalInvocationID.x;
-    const bool write = offset < N * planeValues;
+    const bool write = offset < totalValues;
     const uint element = write ? offset : tileBase;
 
     uint[3] index = uint[](element / planeValues, element / OW % H, element % OW);
@@ -36,9 +37,13 @@ void main() {
     uint ox = index[2];
 
     const uint rowGroups = (W + 3u) / 4u;
-    const uint tileRows = planeValues % gl_WorkGroupSize.x == 0u ? TILE_GROUPS / rowGroups : 0u;
+    const uint tileLast = min(tileBase + gl_WorkGroupSize.x, totalValues) - 1u;
+    const uint tileRows = tileBase / planeValues == tileLast / planeValues ? TILE_GROUPS / rowGroups : 0u;
     const bool tiled = tileRows > 0u;
     const uint rowBlock = tiled ? tileRows : H;
+    if (!write && !tiled) {
+        return;
+    }
 
     // Use Kahan summation to counteract cumulative errors in float summation
     float sumReal = 0.0;
