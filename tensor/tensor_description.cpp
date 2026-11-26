@@ -51,10 +51,9 @@ VkBufferCreateFlags TensorLayout::convertToBufferCreateFlags(VkTensorCreateFlags
 }
 
 VkBufferUsageFlags TensorLayout::convertToBufferUsageFlags(VkTensorUsageFlagsARM tensorUsage) {
-    VkBufferUsageFlags bufferUsage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-#ifdef EXPERIMENTAL_MOLTEN_VK_SUPPORT
-    bufferUsage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-#endif
+    // Copies between tensors with different strides run a compute shader that binds both tensors as
+    // storage buffers, so every tensor buffer needs the storage usage.
+    VkBufferUsageFlags bufferUsage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     if (tensorUsage & VK_TENSOR_USAGE_SHADER_BIT_ARM) {
         bufferUsage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     }
