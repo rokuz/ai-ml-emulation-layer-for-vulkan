@@ -1,0 +1,118 @@
+#
+# SPDX-FileCopyrightText: Copyright 2026 rokuz
+# SPDX-License-Identifier: Apache-2.0
+#
+name: Release binaries
+
+on:
+  push:
+    tags:
+      - "ml-layers-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build-${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-14
+          - platform: linux-x86_64
+            runner: ubuntu-22.04
+          - platform: windows-x86_64
+            runner: windows-2022
+          - platform: android-arm64
+            runner: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ninja
+        run: python -m pip install ninja
+
+      - name: Set up MSVC
+        if: matrix.platform == 'windows-x86_64'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Fetch dependencies
+        run: python scripts/ci/fetch_dependencies.py deps
+
+      - name: Configure
+        shell: bash
+        run: |
+          extra=()
+          if [ "${{ matrix.platform }}" = "android-arm64" ]; then
+            extra+=("-DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_LATEST_HOME/build/cmake/android.toolchain.cmake")
+            extra+=("-DANDROID_ABI=arm64-v8a" "-DANDROID_PLATFORM=android-30")
+          fi
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DGLSLANG_PATH=deps/glslang \
+            -DSPIRV_CROSS_PATH=deps/spirv-cross \
+            -DSPIRV_HEADERS_PATH=deps/spirv-headers \
+            -DSPIRV_TOOLS_PATH=deps/spirv-tools \
+            -DVULKAN_HEADERS_PATH=deps/vulkan-headers \
+            -DJSON_PATH=deps/json \
+            "${extra[@]}"
+
+      - name: Build
+        run: cmake --build build --target VkLayer_Graph VkLayer_Tensor
+
+      - name: Package
+        run: python scripts/ci/package_layers.py build artifacts/ml-layers-${{ matrix.platform }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ml-layers-${{ matrix.platform }}
+          path: artifacts/ml-layers-${{ matrix.platform }}.zip
+
+  release:
+    name: Create release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: artifacts
+        run: sha256sum ml-layers-*.zip | tee SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ML emulation layers (${{ github.ref_name }})
+          body: |
+            Prebuilt Graph and Tensor layers of the ML Emulation Layer for Vulkan.
+
+            Source: `${{ github.sha }}`
+
+            Each archive holds the layer libraries with manifests that point at
+            the library next to them. Add the extracted directory to
+            `VK_ADD_LAYER_PATH` (desktop) or push the libraries to
+            `/data/local/debug/vulkan` (Android).
+
+            - `ml-layers-macos-arm64.zip`
+            - `ml-layers-linux-x86_64.zip`
+            - `ml-layers-windows-x86_64.zip`
+            - `ml-layers-android-arm64.zip`
+          files: |
+            artifacts/ml-layers-*.zip
+            artifacts/SHA256SUMS
+          fail_on_unmatched_files: true
