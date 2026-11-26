@@ -20,17 +20,22 @@ using namespace mlsdk::el::log;
 namespace spvtools::opt {
 
 Pass::Status GraphPassExtInst::Process() {
-    GraphExtInstContext loweringContext{*context(), graphPipeline};
-    std::unordered_map<const GraphExtInstSetDescriptor *, std::unique_ptr<GraphExtInstDecoder>> decoderCache;
-    Decoders decoders;
-    for (const auto &[id, descriptor] : imports) {
-        auto &decoder = decoderCache[descriptor];
-        if (!decoder) {
-            decoder = descriptor->createDecoder(loweringContext);
+    try {
+        GraphExtInstContext loweringContext{*context(), graphPipeline};
+        std::unordered_map<const GraphExtInstSetDescriptor *, std::unique_ptr<GraphExtInstDecoder>> decoderCache;
+        Decoders decoders;
+        for (const auto &[id, descriptor] : imports) {
+            auto &decoder = decoderCache[descriptor];
+            if (!decoder) {
+                decoder = descriptor->createDecoder(loweringContext);
+            }
+            decoders.emplace(id, decoder.get());
         }
-        decoders.emplace(id, decoder.get());
+        handleGraphs(loweringContext, decoders);
+    } catch (...) {
+        error = std::current_exception();
+        return Status::Failure;
     }
-    handleGraphs(loweringContext, decoders);
     return Status::SuccessWithChange;
 }
 

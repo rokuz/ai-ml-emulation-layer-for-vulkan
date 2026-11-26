@@ -107,6 +107,13 @@ TEST_F(MLEmulationLayerGraphForVulkan, TosaRejectsUnknownImport) {
     expectPipelineResult(device, withImport("TOSA.999999.1"), VK_ERROR_UNKNOWN, "TOSA.999999.1");
 }
 
+TEST_F(MLEmulationLayerGraphForVulkan, TosaUnsupportedOperandTypeFailsPipelineCreation) {
+    // MAXIMUM has no int8 variant in TOSA 1.0; the lowering error must come back as a result code
+    const auto graph = makeStorageConversionGraph("%i8", "%i8", 1, 1, true, "MAXIMUM %u1 %a %b", "", "TOSA.001000.1");
+    expectPipelineResult(device, graph, VK_ERROR_UNKNOWN, "Missing precompiled shader", "storage_conversion",
+                         {{VK_FORMAT_R8_SINT, {1}}, {VK_FORMAT_R8_SINT, {1}}, {VK_FORMAT_R8_SINT, {1}}});
+}
+
 TEST(GraphExtInstRegistry, ExactImportLookup) {
     for (const auto *name : {"TOSA.001000.1", "Arm.MotionEngine.100"}) {
         const auto *descriptor = spvtools::opt::findGraphExtInstSet(name);

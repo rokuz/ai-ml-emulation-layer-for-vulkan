@@ -11,6 +11,7 @@
 #include "source/opt/build_module.h"
 
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -140,9 +141,13 @@ OpGraphEndARM
         resource.sType = VK_STRUCTURE_TYPE_DATA_GRAPH_PIPELINE_RESOURCE_INFO_ARM;
         resource.pNext = &ordinaryDescription;
         pipeline.makeDescriptorSetBinding(resource);
-        spvtools::opt::GraphPassExtInst pass(pipeline, {});
+        std::exception_ptr passError;
+        spvtools::opt::GraphPassExtInst pass(pipeline, {}, passError);
         try {
-            pass.Run(ir.get());
+            EXPECT_EQ(pass.Run(ir.get()), spvtools::opt::Pass::Status::Failure);
+            if (passError) {
+                std::rethrow_exception(passError);
+            }
             FAIL() << "Expected a mismatched graph resource to be rejected";
         } catch (const std::invalid_argument &error) {
             EXPECT_STREQ(error.what(), "Block-scaled graph resource does not match its SPIR-V tensor type");

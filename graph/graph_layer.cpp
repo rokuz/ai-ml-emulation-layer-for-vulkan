@@ -31,6 +31,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -914,13 +915,18 @@ class GraphLayer : public VulkanLayerImpl {
                     pipeline->profilingPipelineKind = ProfilingPipelineKind::GRAPH_OP;
                 }
 
-                optimizer.RegisterPass(spvtools::createGraphPass(*graphPipeline, instructionSetImports.extInstImports));
+                std::exception_ptr graphPassError;
+                optimizer.RegisterPass(
+                    spvtools::createGraphPass(*graphPipeline, instructionSetImports.extInstImports, graphPassError));
 
                 // Run passes
                 spvtools::OptimizerOptions options;
                 options.set_run_validator(false);
                 std::vector<uint32_t> optimizedModule;
                 if (!optimizer.Run(spirvCode, spirvSize, &optimizedModule, options)) {
+                    if (graphPassError) {
+                        std::rethrow_exception(graphPassError);
+                    }
                     graphLog(Severity::Error) << "Failed to run optimizer passes" << std::endl;
                     return VK_ERROR_UNKNOWN;
                 }

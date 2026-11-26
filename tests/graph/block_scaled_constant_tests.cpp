@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <exception>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -320,8 +321,11 @@ OpGraphEndARM
                                      nullptr);
     pipeline.makeConstTensor(constant);
 
-    spvtools::opt::GraphPassExtInst pass(pipeline, {});
-    EXPECT_THROW(pass.Run(ir.get()), std::invalid_argument);
+    std::exception_ptr error;
+    spvtools::opt::GraphPassExtInst pass(pipeline, {}, error);
+    EXPECT_EQ(pass.Run(ir.get()), spvtools::opt::Pass::Status::Failure);
+    ASSERT_TRUE(error);
+    EXPECT_THROW(std::rethrow_exception(error), std::invalid_argument);
 }
 #endif
 
