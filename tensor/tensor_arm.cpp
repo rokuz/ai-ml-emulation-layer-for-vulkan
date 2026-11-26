@@ -350,21 +350,27 @@ TensorCopyPipeline::PushConstant TensorCopyPipeline::createPushConstant(const Te
     return constant;
 }
 
-VkShaderModule TensorCopyPipeline::createShaderModule(const TensorPlane &srcPlane) const {
-    std::string srcType;
-    switch (srcPlane.layout.format) {
-    case VK_FORMAT_R8_SFLOAT_FPENCODING_FLOAT8E4M3_ARM:
-    case VK_FORMAT_R8_SFLOAT_FPENCODING_FLOAT8E5M2_ARM:
-#ifdef VK_ARM_tensors2
-    case VK_FORMAT_R8_UFLOAT_FPENCODING_FLOAT8UNSIGNEDE8M0_ARM:
-#endif
-        // Copy encoded values and scales as raw bytes without decoding.
-        srcType = "uint8_t";
-        break;
+namespace {
+// The copy moves raw elements without decoding them, so an unsigned type of the element size
+// works for every tensor format, including UNORM, SNORM, SRGB and the 8-bit float encodings.
+std::string copyElementType(std::size_t elementSize) {
+    switch (elementSize) {
+    case 1:
+        return "uint8_t";
+    case 2:
+        return "uint16_t";
+    case 4:
+        return "uint32_t";
+    case 8:
+        return "uint64_t";
     default:
-        srcType = getFormatInfo(srcPlane.layout.format)->glslType;
-        break;
+        throw std::runtime_error("Unsupported tensor element size for copy: " + std::to_string(elementSize));
     }
+}
+} // namespace
+
+VkShaderModule TensorCopyPipeline::createShaderModule(const TensorPlane &srcPlane) const {
+    const auto srcType = copyElementType(srcPlane.layout.elementSize);
     const std::lock_guard lock(cacheMutex);
     auto &spirv = spirvCache[srcType];
     if (spirv.empty()) {

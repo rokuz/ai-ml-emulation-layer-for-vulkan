@@ -797,21 +797,8 @@ TEST_F(MLEmulationLayerGraphForVulkan, CopyNonPackedTensorTwice) {
     }
 }
 
-TEST_F(MLEmulationLayerGraphForVulkan, CopyLargeNonPackedTensor) {
-    const std::vector<int64_t> dimensions{1, 1920, 1080, 3};
-    const std::vector<int64_t> strides = {12441600, 6480, 6, 2};
-
-    const std::vector<uint8_t> data;
-    const auto useForCopy = true;
-    auto inputTensor = std::make_shared<Tensor>(device, Shape{vk::Format::eR8Sint, dimensions}, data, useForCopy);
-    auto outputTensor =
-        std::make_shared<Tensor>(device, Shape{vk::Format::eR8Sint, dimensions, strides}, data, useForCopy);
-    const auto elementCount = inputTensor->size();
-    std::vector<uint8_t> expected(elementCount);
-    for (size_t i = 0; i < elementCount; ++i) {
-        expected[i] = -128 + static_cast<int>(i % 256);
-    }
-    std::memcpy(inputTensor->data(), expected.data(), expected.size());
+void copyTensorAndWait(const std::shared_ptr<Device> &device, const std::shared_ptr<Tensor> &inputTensor,
+                       const std::shared_ptr<Tensor> &outputTensor, uint32_t rank) {
     // command pool
     const vk::CommandPoolCreateInfo commandPoolCreateInfo{
         {},                                                  // flags
@@ -833,7 +820,7 @@ TEST_F(MLEmulationLayerGraphForVulkan, CopyLargeNonPackedTensor) {
         vk::CommandBufferUsageFlagBits::eOneTimeSubmit, // flags
     };
     commandBuffer.begin(commandBufferBeginInfo);
-    const vk::TensorCopyARM region{static_cast<uint32_t>(dimensions.size())};
+    const vk::TensorCopyARM region{rank};
     const vk::CopyTensorInfoARM copyInfo{
         &(*inputTensor),  // srcTensor
         &(*outputTensor), // dstTensor
@@ -854,13 +841,29 @@ TEST_F(MLEmulationLayerGraphForVulkan, CopyLargeNonPackedTensor) {
         &(*commandBuffer), // command buffers
         0,                 // signal semaphore count
     };
-    auto begin = std::chrono::steady_clock::now();
-
     queue.submit({1, &submitInfo}, *fence);
     while (vk::Result::eTimeout == (&(*device)).waitForFences({*fence}, vk::True, uint64_t(-1))) {
         // Wait again
     }
+}
 
+TEST_F(MLEmulationLayerGraphForVulkan, CopyLargeNonPackedTensor) {
+    const std::vector<int64_t> dimensions{1, 1920, 1080, 3};
+    const std::vector<int64_t> strides = {12441600, 6480, 6, 2};
+
+    const std::vector<uint8_t> data;
+    const auto useForCopy = true;
+    auto inputTensor = std::make_shared<Tensor>(device, Shape{vk::Format::eR8Sint, dimensions}, data, useForCopy);
+    auto outputTensor =
+        std::make_shared<Tensor>(device, Shape{vk::Format::eR8Sint, dimensions, strides}, data, useForCopy);
+    const auto elementCount = inputTensor->size();
+    std::vector<uint8_t> expected(elementCount);
+    for (size_t i = 0; i < elementCount; ++i) {
+        expected[i] = -128 + static_cast<int>(i % 256);
+    }
+    std::memcpy(inputTensor->data(), expected.data(), expected.size());
+    auto begin = std::chrono::steady_clock::now();
+    copyTensorAndWait(device, inputTensor, outputTensor, static_cast<uint32_t>(dimensions.size()));
     auto end = std::chrono::steady_clock::now();
 
     std::cout << "Runtime " << std::dec << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count()
@@ -873,6 +876,37 @@ TEST_F(MLEmulationLayerGraphForVulkan, CopyLargeNonPackedTensor) {
     // This layout stores each byte at twice its packed offset.
     for (size_t i = 0; i < elementCount; ++i) {
         ASSERT_EQ(actual[2 * i], expected[i]) << "element " << i;
+    }
+}
+
+TEST_F(MLEmulationLayerGraphForVulkan, CopyNonPackedUnormTensor) {
+    const std::vector<int64_t> dimensions{1, 4, 6, 4};
+    const std::vector<int64_t> strides = {256, 64, 4, 1};
+
+    const std::vector<uint8_t> data;
+    const auto useForCopy = true;
+    auto inputTensor = std::make_shared<Tensor>(device, Shape{vk::Format::eR8Unorm, dimensions}, data, useForCopy);
+    auto outputTensor =
+        std::make_shared<Tensor>(device, Shape{vk::Format::eR8Unorm, dimensions, strides}, data, useForCopy);
+    const auto elementCount = inputTensor->size();
+    std::vector<uint8_t> expected(elementCount);
+    for (size_t i = 0; i < elementCount; ++i) {
+        expected[i] = static_cast<uint8_t>(i * 7 + 3);
+    }
+    std::memcpy(inputTensor->data(), expected.data(), expected.size());
+
+    copyTensorAndWait(device, inputTensor, outputTensor, static_cast<uint32_t>(dimensions.size()));
+
+    std::vector<uint8_t> actual(outputTensor->size());
+    std::memcpy(actual.data(), outputTensor->data(), actual.size());
+    for (int64_t y = 0; y < dimensions[1]; ++y) {
+        for (int64_t x = 0; x < dimensions[2]; ++x) {
+            for (int64_t c = 0; c < dimensions[3]; ++c) {
+                const auto packed = static_cast<size_t>(((y * dimensions[2]) + x) * dimensions[3] + c);
+                const auto strided = static_cast<size_t>((y * strides[1]) + (x * strides[2]) + (c * strides[3]));
+                ASSERT_EQ(actual[strided], expected[packed]) << "element (" << y << ", " << x << ", " << c << ")";
+            }
+        }
     }
 }
 
