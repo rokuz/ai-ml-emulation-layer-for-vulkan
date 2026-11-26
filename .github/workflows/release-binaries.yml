@@ -77,6 +77,12 @@ jobs:
       - name: Build
         run: cmake --build build --target VkLayer_Graph VkLayer_Tensor
 
+      - name: Strip Android libraries
+        if: matrix.platform == 'android-arm64'
+        run: |
+          "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-unneeded \
+            build/graph/libVkLayer_Graph.so build/tensor/libVkLayer_Tensor.so
+
       - name: Package
         run: python scripts/ci/package_layers.py build artifacts/ml-layers-${{ matrix.platform }}.zip
 
