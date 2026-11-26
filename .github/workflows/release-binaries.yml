@@ -22,7 +22,7 @@ jobs:
       matrix:
         include:
           - platform: macos-arm64
-            runner: macos-14
+            runner: macos-latest
           - platform: linux-x86_64
             runner: ubuntu-22.04
           - platform: windows-x86_64
@@ -49,6 +49,13 @@ jobs:
       - name: Fetch dependencies
         run: python scripts/ci/fetch_dependencies.py deps
 
+      - name: Build host glslang
+        if: matrix.platform == 'android-arm64'
+        run: |
+          cmake -S deps/glslang -B host-glslang -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_OPT=OFF -DGLSLANG_TESTS=OFF -DENABLE_HLSL=OFF
+          cmake --build host-glslang --target glslang-standalone
+
       - name: Configure
         shell: bash
         run: |
@@ -56,6 +63,7 @@ jobs:
           if [ "${{ matrix.platform }}" = "android-arm64" ]; then
             extra+=("-DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_LATEST_HOME/build/cmake/android.toolchain.cmake")
             extra+=("-DANDROID_ABI=arm64-v8a" "-DANDROID_PLATFORM=android-30")
+            extra+=("-DGLSLANG_EXECUTABLE=$PWD/host-glslang/StandAlone/glslang")
           fi
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DGLSLANG_PATH=deps/glslang \
